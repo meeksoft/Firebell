@@ -4,6 +4,14 @@
 
 Firebell watches log files from AI coding assistants (Claude Code, GitHub Codex, GitHub Copilot, Gemini, OpenCode) and sends notifications when activity is detected. Know when your AI assistant is working, idle, or finished—without checking the terminal.
 
+## Quick Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/meeksoft/Firebell/main/install.sh | bash
+```
+
+Requires: Go 1.21+ and Git
+
 ## Features
 
 - **Multi-CLI Support** - Monitors Claude Code, GitHub Codex, Copilot, Gemini, and OpenCode
@@ -19,12 +27,15 @@ Firebell watches log files from AI coding assistants (Claude Code, GitHub Codex,
 ## Quick Start
 
 ```bash
-# Clone and build
-git clone https://github.com/yourusername/firebell.git
-cd firebell
+# Option 1: One-line install
+curl -fsSL https://raw.githubusercontent.com/meeksoft/Firebell/main/install.sh | bash
+
+# Option 2: Manual build
+git clone https://github.com/meeksoft/Firebell.git
+cd Firebell
 make install
 
-# Add to PATH
+# Add to PATH (if not already done)
 export PATH="$HOME/.firebell/bin:$PATH"
 
 # Run interactive setup
