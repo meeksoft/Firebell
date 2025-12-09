@@ -204,6 +204,12 @@ func (w *Watcher) processLines(ctx context.Context, agentName, path string, line
 		return
 	}
 
+	// Determine if we should send activity notifications
+	// - Slack: Never send activity notifications (only "likely finished")
+	// - stdout normal: Only send "likely finished" notifications
+	// - stdout verbose: Send all activity notifications
+	sendActivity := w.cfg.Notify.Type == "stdout" && w.cfg.Output.Verbosity == "verbose"
+
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -214,8 +220,13 @@ func (w *Watcher) processLines(ctx context.Context, agentName, path string, line
 			continue
 		}
 
-		// Record the cue
+		// Always record the cue (for quiet period tracking)
 		w.state.RecordCue(agentName)
+
+		// Only send activity notification if verbose stdout mode
+		if !sendActivity {
+			continue
+		}
 
 		// Create and send notification
 		n := notify.NewNotificationFromMatch(

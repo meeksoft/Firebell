@@ -90,6 +90,9 @@ func main() {
 	if flags.Stdout {
 		cfg.Notify.Type = "stdout"
 	}
+	if flags.Verbose {
+		cfg.Output.Verbosity = "verbose"
+	}
 
 	// Determine which agents to monitor
 	var agents []monitor.Agent
@@ -381,6 +384,9 @@ func runWrap(flags *config.Flags) {
 	// Override config with flags
 	if flags.Stdout {
 		cfg.Notify.Type = "stdout"
+	}
+	if flags.Verbose {
+		cfg.Output.Verbosity = "verbose"
 	}
 
 	// Create notifier

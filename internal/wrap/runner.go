@@ -3,10 +3,13 @@ package wrap
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"firebell/internal/config"
 	"firebell/internal/detect"
@@ -15,10 +18,14 @@ import (
 
 // Runner executes a command and monitors its output for AI activity.
 type Runner struct {
-	cfg      *config.Config
-	notifier notify.Notifier
-	matcher  detect.Matcher
+	cfg       *config.Config
+	notifier  notify.Notifier
+	matcher   detect.Matcher
 	agentName string
+
+	// Deduplication state
+	lastNotifyTime time.Time
+	lastNotifyHash string
 }
 
 // NewRunner creates a new command runner.
@@ -88,6 +95,12 @@ func (r *Runner) monitorOutput(ctx context.Context, reader io.Reader) {
 	buf := make([]byte, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
+	// Determine if we should send activity notifications
+	// - Slack: Never send activity notifications (only "likely finished")
+	// - stdout normal: Only send "likely finished" notifications
+	// - stdout verbose: Send all activity notifications
+	sendActivity := r.cfg.Notify.Type == "stdout" && r.cfg.Output.Verbosity == "verbose"
+
 	var recentLines []string
 	const maxRecentLines = 10
 
@@ -100,16 +113,35 @@ func (r *Runner) monitorOutput(ctx context.Context, reader io.Reader) {
 			recentLines = recentLines[1:]
 		}
 
-		// Check for match
-		match := r.matcher.Match(line)
-		if match != nil {
-			r.sendNotification(ctx, match, recentLines)
+		// Check for match - only send if verbose mode
+		if sendActivity {
+			match := r.matcher.Match(line)
+			if match != nil {
+				r.sendNotification(ctx, match, recentLines)
+			}
 		}
 	}
 }
 
+// dedupeWindowMs is the minimum time between notifications for the same content.
+const dedupeWindowMs = 500
+
 // sendNotification sends a notification for a detected match.
 func (r *Runner) sendNotification(ctx context.Context, match *detect.Match, recentLines []string) {
+	// Compute hash for deduplication (based on matched line)
+	h := sha256.Sum256([]byte(match.Line))
+	hash := hex.EncodeToString(h[:8])
+
+	// Check for duplicate within time window
+	now := time.Now()
+	if hash == r.lastNotifyHash && now.Sub(r.lastNotifyTime) < dedupeWindowMs*time.Millisecond {
+		return // Skip duplicate
+	}
+
+	// Update deduplication state
+	r.lastNotifyHash = hash
+	r.lastNotifyTime = now
+
 	displayName := r.agentName
 	if displayName == "" {
 		displayName = "Wrapped Command"

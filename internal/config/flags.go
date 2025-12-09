@@ -16,6 +16,7 @@ type Flags struct {
 	Check      bool
 	Agent      string
 	Stdout     bool
+	Verbose    bool // Enable verbose output (show all activity)
 	Version    bool
 	Migrate    bool
 	Wrap       bool     // Wrap a command
@@ -59,6 +60,7 @@ func ParseFlags() *Flags {
 	flag.BoolVar(&flags.Check, "check", false, "Run health check and exit")
 	flag.StringVar(&flags.Agent, "agent", "", "Filter to specific agent (codex|copilot|claude|gemini|opencode)")
 	flag.BoolVar(&flags.Stdout, "stdout", false, "Output to stdout instead of Slack (for testing)")
+	flag.BoolVar(&flags.Verbose, "verbose", false, "Show all activity notifications (default: only 'likely finished')")
 	flag.BoolVar(&flags.Version, "version", false, "Print version and exit")
 	flag.BoolVar(&flags.Migrate, "migrate", false, "Migrate v1 config to v2 YAML format")
 
@@ -77,6 +79,7 @@ func parseWrapFlags(flags *Flags) *Flags {
 	wrapFlags.StringVar(&flags.ConfigPath, "config", "", "Config file path")
 	wrapFlags.StringVar(&flags.WrapName, "name", "", "Display name for the wrapped command")
 	wrapFlags.BoolVar(&flags.Stdout, "stdout", false, "Output notifications to stdout")
+	wrapFlags.BoolVar(&flags.Verbose, "verbose", false, "Show all activity notifications")
 
 	wrapFlags.Usage = func() {
 		fmt.Fprintf(os.Stderr, `firebell wrap - Run a command with firebell monitoring
@@ -88,6 +91,7 @@ FLAGS:
   --config PATH    Config file (default: ~/.firebell/config.yaml)
   --name NAME      Display name for notifications (default: command name)
   --stdout         Output notifications to stdout instead of Slack
+  --verbose        Show all activity notifications (default: only 'likely finished')
 
 EXAMPLES:
   # Wrap Claude Code
@@ -96,8 +100,8 @@ EXAMPLES:
   # Wrap with custom name
   firebell wrap --name "My Claude" -- claude --debug
 
-  # Wrap with stdout notifications
-  firebell wrap --stdout -- codex
+  # Wrap with stdout and verbose (see all activity)
+  firebell wrap --stdout --verbose -- codex
 
   # Wrap any command
   firebell wrap --name "GPT Script" -- python my_gpt_script.py
@@ -256,6 +260,7 @@ FLAGS:
   --check             Health check and exit
   --agent NAME        Filter to specific agent: codex, copilot, claude, gemini, opencode
   --stdout            Output to stdout instead of Slack (for testing)
+  --verbose           Show all activity notifications (default: only 'likely finished')
   --version           Print version and exit
   --migrate           Migrate v1 config to v2 YAML format
 

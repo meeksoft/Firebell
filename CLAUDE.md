@@ -165,6 +165,7 @@ advanced:
 --check          Health check
 --agent NAME     Filter to specific agent
 --stdout         Output to stdout
+--verbose        Show all activity (default: only 'likely finished')
 --version        Print version
 --migrate        Migrate v1 config
 ```
@@ -174,7 +175,7 @@ advanced:
 ```
 wrap             Wrap a command and monitor its output
                  Usage: firebell wrap [flags] -- <command> [args...]
-                 Flags: --config, --name, --stdout
+                 Flags: --config, --name, --stdout, --verbose
 
 start            Start daemon in background
 stop             Stop running daemon
@@ -182,6 +183,18 @@ restart          Restart daemon
 status           Show daemon status
 logs             View daemon logs (use -f to follow)
 ```
+
+### Notification Behavior
+
+By default, firebell sends **only "likely finished" notifications** (when AI activity stops for the quiet period). This prevents notification spam while still alerting you when your AI is done.
+
+| Mode              | Behavior |
+|-------------------|----------|
+| Slack (default)   | Only "likely finished" notifications |
+| stdout (normal)   | Only "likely finished" notifications |
+| stdout --verbose  | All activity + "likely finished" |
+
+Use `--verbose` when you want to see every AI response detection in real-time (useful for debugging or active monitoring).
 
 ## Testing
 
