@@ -1,4 +1,4 @@
-// Package util provides shared utilities for ai-chime.
+// Package util provides shared utilities for firebell.
 package util
 
 import (

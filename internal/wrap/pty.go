@@ -1,5 +1,5 @@
-// Package wrap provides command wrapping functionality for ai-chime.
-// It allows running commands through ai-chime to monitor their output in real-time.
+// Package wrap provides command wrapping functionality for firebell.
+// It allows running commands through firebell to monitor their output in real-time.
 package wrap
 
 import (

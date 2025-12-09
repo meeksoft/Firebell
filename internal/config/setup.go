@@ -1,4 +1,4 @@
-// Package config provides the interactive setup wizard for ai-chime v2.0.
+// Package config provides the interactive setup wizard for firebell v2.0.
 package config
 
 import (
@@ -37,7 +37,7 @@ type SetupOptions struct {
 // SetupWizard runs the interactive configuration wizard.
 func SetupWizard(opts SetupOptions) error {
 	fmt.Println()
-	fmt.Println("Welcome to ai-chime v2.0 setup!")
+	fmt.Println("Welcome to firebell v2.0 setup!")
 	fmt.Println()
 
 	cfg := DefaultConfig()
@@ -315,7 +315,7 @@ func DefaultTestWebhook(webhook string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	payload := `{"text":"ai-chime v2.0 - Test notification"}`
+	payload := `{"text":"firebell v2.0 - Test notification"}`
 	req, err := http.NewRequestWithContext(ctx, "POST", webhook, strings.NewReader(payload))
 	if err != nil {
 		return err

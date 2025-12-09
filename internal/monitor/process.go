@@ -1,4 +1,4 @@
-// Package monitor provides process monitoring with caching for ai-chime v2.0.
+// Package monitor provides process monitoring with caching for firebell v2.0.
 package monitor
 
 import (

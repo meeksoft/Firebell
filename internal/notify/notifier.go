@@ -1,4 +1,4 @@
-// Package notify provides notification delivery for ai-chime.
+// Package notify provides notification delivery for firebell.
 package notify
 
 import (

@@ -93,7 +93,7 @@ func NewQuietNotification(displayName string, cpuPct float64) *Notification {
 func NewProcessExitNotification(pid int) *Notification {
 	return &Notification{
 		Title:   "Process Exited",
-		Agent:   "ai-chime",
+		Agent:   "firebell",
 		Message: fmt.Sprintf("Monitored process (PID %d) has terminated", pid),
 		Time:    time.Now(),
 	}

@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// State holds all runtime monitoring state for ai-chime.
+// State holds all runtime monitoring state for firebell.
 // It consolidates what was previously 6 separate maps in v1.
 type State struct {
 	mu      sync.RWMutex

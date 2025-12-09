@@ -79,7 +79,7 @@ func parseWrapFlags(flags *Flags) *Flags {
 	wrapFlags.BoolVar(&flags.Stdout, "stdout", false, "Output notifications to stdout")
 
 	wrapFlags.Usage = func() {
-		fmt.Fprintf(os.Stderr, `firebell wrap - Run a command with ai-chime monitoring
+		fmt.Fprintf(os.Stderr, `firebell wrap - Run a command with firebell monitoring
 
 USAGE:
   firebell wrap [flags] -- <command> [args...]

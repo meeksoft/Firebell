@@ -362,7 +362,7 @@ func runMonitor(cfg *config.Config, agents []monitor.Agent) error {
 	return runErr
 }
 
-// runWrap runs a command with ai-chime monitoring.
+// runWrap runs a command with firebell monitoring.
 func runWrap(flags *config.Flags) {
 	if len(flags.WrapArgs) == 0 {
 		fmt.Fprintln(os.Stderr, "Error: no command specified")

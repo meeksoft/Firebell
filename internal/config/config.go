@@ -1,4 +1,4 @@
-// Package config provides configuration management for ai-chime v2.0.
+// Package config provides configuration management for firebell v2.0.
 // It supports YAML config files with backward compatibility for v1 JSON configs.
 package config
 
@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Config is the root configuration structure for ai-chime v2.0.
+// Config is the root configuration structure for firebell v2.0.
 type Config struct {
 	Version  string         `yaml:"version" json:"version"`
 	Notify   NotifyConfig   `yaml:"notify" json:"notify"`
