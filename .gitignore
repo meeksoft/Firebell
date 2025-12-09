@@ -29,3 +29,6 @@ Thumbs.db
 
 # Local config (user's actual config should not be committed)
 # The config template is in README.md
+
+# Claude Code
+.claude/

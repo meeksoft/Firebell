@@ -291,8 +291,8 @@ CONFIGURATION:
   To reconfigure, run: firebell --setup
 
 MORE INFO:
-  Documentation: https://github.com/yourusername/firebell
-  Report issues: https://github.com/yourusername/firebell/issues
+  Documentation: https://github.com/meeksoft/Firebell
+  Report issues: https://github.com/meeksoft/Firebell/issues
 
 `)
 }
