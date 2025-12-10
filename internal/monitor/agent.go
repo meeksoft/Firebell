@@ -24,8 +24,8 @@ var Registry = map[string]Agent{
 	"claude": {
 		Name:         "claude",
 		DisplayName:  "Claude Code",
-		LogPath:      "~/.claude/debug",
-		LogPatterns:  []string{"*.log", "*.jsonl"},
+		LogPath:      "~/.claude/projects",
+		LogPatterns:  []string{"*.jsonl"},
 		ProcessNames: []string{"claude", "claude-code"},
 	},
 	"codex": {

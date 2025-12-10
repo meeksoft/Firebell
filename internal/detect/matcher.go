@@ -154,7 +154,8 @@ func (m *ComboMatcher) Match(line string) *Match {
 }
 
 // DefaultPattern is the default regex pattern for generic matching.
-const DefaultPattern = `assistant_message|agent_message|responses/compact`
+// Matches Claude ("type":"assistant"), Codex, and other common patterns.
+const DefaultPattern = `"type":"assistant"|assistant_message|agent_message|responses/compact`
 
 // CreateMatcher creates the appropriate matcher for an agent.
 func CreateMatcher(agentName string) Matcher {
