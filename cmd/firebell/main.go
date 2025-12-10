@@ -155,7 +155,7 @@ func runSetup(flags *config.Flags) {
 
 // runHealthCheck shows the status of all supported agents.
 func runHealthCheck(flags *config.Flags) {
-	fmt.Println("firebell v2.0 - Health Check")
+	fmt.Printf("firebell %s - Health Check\n", config.Version)
 	fmt.Println()
 
 	// Check config
@@ -319,7 +319,7 @@ func runMonitor(cfg *config.Config, agents []monitor.Agent) error {
 		logger.Info("Agents: %s", agentNames)
 		logger.Info("Monitoring started")
 	} else {
-		fmt.Println("firebell v2.0 - Starting monitoring...")
+		fmt.Printf("firebell %s - Starting monitoring...\n", config.Version)
 		fmt.Printf("  Config: %s\n", config.DefaultConfigPath())
 		fmt.Printf("  Notify: %s\n", notifier.Name())
 		fmt.Printf("  Agents: ")

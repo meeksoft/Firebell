@@ -37,7 +37,7 @@ type SetupOptions struct {
 // SetupWizard runs the interactive configuration wizard.
 func SetupWizard(opts SetupOptions) error {
 	fmt.Println()
-	fmt.Println("Welcome to firebell v2.0 setup!")
+	fmt.Printf("Welcome to firebell %s setup!\n", Version)
 	fmt.Println()
 
 	cfg := DefaultConfig()
@@ -315,7 +315,7 @@ func DefaultTestWebhook(webhook string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	payload := `{"text":"firebell v2.0 - Test notification"}`
+	payload := fmt.Sprintf(`{"text":"firebell %s - Test notification"}`, Version)
 	req, err := http.NewRequestWithContext(ctx, "POST", webhook, strings.NewReader(payload))
 	if err != nil {
 		return err

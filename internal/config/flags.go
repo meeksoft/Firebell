@@ -226,9 +226,10 @@ EXAMPLES:
 	return flags
 }
 
-// customUsage provides user-friendly help text for v2.0.
+// customUsage provides user-friendly help text.
 func customUsage() {
-	fmt.Fprintf(os.Stderr, `firebell v2.0 - Real-time AI CLI activity monitor
+	fmt.Fprintf(os.Stderr, `firebell %s - Real-time AI CLI activity monitor`, Version)
+	fmt.Fprintf(os.Stderr, `
 
 USAGE:
   firebell [flags]                              Run in foreground (stdout mode)
