@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -234,21 +235,32 @@ func formatAge(t time.Time) string {
 	}
 }
 
-// countLogFiles counts log files in a directory.
+// countLogFiles counts log files in a directory recursively (max depth 4).
 func countLogFiles(dir string) int {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 0
-	}
 	count := 0
-	for _, e := range entries {
-		if !e.IsDir() {
-			name := e.Name()
-			if hasLogExtension(name) {
-				count++
-			}
+	maxDepth := 4
+	baseDepth := strings.Count(dir, string(filepath.Separator))
+
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
 		}
-	}
+		// Check depth
+		depth := strings.Count(path, string(filepath.Separator)) - baseDepth
+		if info.IsDir() {
+			if depth >= maxDepth {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if depth > maxDepth {
+			return nil
+		}
+		if hasLogExtension(info.Name()) {
+			count++
+		}
+		return nil
+	})
 	return count
 }
 
