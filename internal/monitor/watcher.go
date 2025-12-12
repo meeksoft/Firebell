@@ -244,17 +244,10 @@ func (w *Watcher) processLines(ctx context.Context, agentName, path string, line
 			}
 
 		case detect.MatchHolding:
-			// Holding for tool permission - send notification immediately with tool name
-			// Also record cue so quiet period tracking works
+			// Tool permission requested - record cue for quiet period tracking
+			// After quiet period, this will trigger "Holding" notification
+			// (Don't notify immediately - tool may be auto-approved)
 			w.state.RecordCue(agentName, detect.MatchHolding)
-
-			toolName := "unknown"
-			if match.Meta != nil {
-				if t, ok := match.Meta["tool"].(string); ok {
-					toolName = t
-				}
-			}
-			w.sendHoldingNotification(ctx, agentState.Agent.DisplayName, toolName)
 
 		case detect.MatchAwaiting:
 			// Explicit awaiting (rare - most agents use MatchComplete + quiet period)
@@ -288,20 +281,6 @@ func (w *Watcher) processLines(ctx context.Context, agentName, path string, line
 				fmt.Fprintf(os.Stderr, "Failed to send notification: %v\n", err)
 			}
 		}
-	}
-}
-
-// sendHoldingNotification sends a holding notification immediately when tool permission is needed.
-func (w *Watcher) sendHoldingNotification(ctx context.Context, displayName, toolName string) {
-	n := &notify.Notification{
-		Agent:   displayName,
-		Title:   "Holding",
-		Message: fmt.Sprintf("Tool: %s", toolName),
-		Time:    time.Now(),
-	}
-
-	if err := w.notifier.Send(ctx, n); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to send holding notification: %v\n", err)
 	}
 }
 
@@ -365,11 +344,11 @@ func (w *Watcher) checkQuietPeriods(ctx context.Context) {
 				}
 
 			case detect.MatchHolding:
-				// Already sent immediate notification, but still quiet - resend reminder
+				// Tool permission was requested and agent is still quiet - send "Holding"
 				n = &notify.Notification{
 					Agent:   agentState.Agent.DisplayName,
 					Title:   "Holding",
-					Message: "Still waiting for tool approval",
+					Message: "Waiting for tool approval",
 					Time:    time.Now(),
 				}
 
