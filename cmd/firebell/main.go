@@ -4,8 +4,10 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -76,6 +78,21 @@ func main() {
 
 	if flags.DaemonLogs {
 		runDaemonLogs(flags)
+		return
+	}
+
+	if flags.Events {
+		runEvents(flags)
+		return
+	}
+
+	if flags.WebhookTest {
+		runWebhookTest(flags)
+		return
+	}
+
+	if flags.Listen {
+		runListen(flags)
 		return
 	}
 
@@ -305,10 +322,45 @@ func runMonitor(cfg *config.Config, agents []monitor.Agent) error {
 		logger.Info("Config: %s", config.DefaultConfigPath())
 	}
 
-	// Create notifier
-	notifier, err := notify.NewNotifier(cfg)
+	// Create socket server if enabled
+	var socketServer *daemon.SocketServer
+	var socketNotifier *daemon.SocketNotifier
+	var extras []notify.Notifier
+
+	if cfg.Daemon.Socket {
+		var err error
+		socketServer, err = daemon.NewSocketServer(cfg.Daemon.SocketPath)
+		if err != nil {
+			if isDaemon {
+				logger.Warn("Failed to create socket: %v", err)
+			}
+		} else {
+			socketNotifier = daemon.NewSocketNotifier(socketServer)
+			extras = append(extras, socketNotifier)
+			if isDaemon {
+				logger.Info("Socket: %s", socketServer.Path())
+			}
+		}
+	}
+
+	// Create notifier with extras
+	notifier, err := notify.NewNotifierWithExtras(cfg, extras)
 	if err != nil {
 		return fmt.Errorf("failed to create notifier: %w", err)
+	}
+
+	// Emit daemon start event if event file is enabled
+	var eventFileNotifier *notify.EventFileNotifier
+	if multi, ok := notifier.(*notify.MultiNotifier); ok {
+		for _, n := range multi.Secondary() {
+			if ef, ok := n.(*notify.EventFileNotifier); ok {
+				eventFileNotifier = ef
+				break
+			}
+		}
+	}
+	if eventFileNotifier != nil {
+		eventFileNotifier.EmitDaemonStart()
 	}
 
 	// Create watcher
@@ -349,6 +401,11 @@ func runMonitor(cfg *config.Config, agents []monitor.Agent) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Start socket server
+	if socketServer != nil {
+		socketServer.Start(ctx)
+	}
+
 	// Handle shutdown signals
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -368,6 +425,21 @@ func runMonitor(cfg *config.Config, agents []monitor.Agent) error {
 		runErr = watcher.RunPolling(ctx)
 	} else {
 		runErr = watcher.Run(ctx)
+	}
+
+	// Emit daemon stop event
+	if eventFileNotifier != nil {
+		eventFileNotifier.EmitDaemonStop()
+	}
+
+	// Close socket server
+	if socketServer != nil {
+		socketServer.Close()
+	}
+
+	// Close multi-notifier if applicable
+	if multi, ok := notifier.(*notify.MultiNotifier); ok {
+		multi.Close()
 	}
 
 	if isDaemon {
@@ -634,4 +706,225 @@ func formatBytes(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// runEvents shows or follows the event file.
+func runEvents(flags *config.Flags) {
+	// Get event file path
+	eventPath := filepath.Join(config.DefaultConfigDir(), "events.jsonl")
+
+	// Check if file exists
+	info, err := os.Stat(eventPath)
+	if os.IsNotExist(err) {
+		fmt.Println("Event file not found.")
+		fmt.Println()
+		fmt.Printf("Location: %s\n", eventPath)
+		fmt.Println()
+		fmt.Println("The event file is created when firebell runs with event_file enabled (default).")
+		fmt.Println("Start firebell to begin generating events:")
+		fmt.Println("  firebell start")
+		fmt.Println("  firebell --stdout")
+		return
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if flags.EventsFollow {
+		// Follow mode
+		fmt.Printf("Following %s (Ctrl+C to stop)\n\n", eventPath)
+		if err := tailFollow(eventPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		// Show info and recent events
+		fmt.Println("firebell events")
+		fmt.Println()
+		fmt.Printf("  File:   %s\n", eventPath)
+		fmt.Printf("  Size:   %s\n", formatBytes(info.Size()))
+		fmt.Printf("  Modified: %s\n", formatAge(info.ModTime()))
+		fmt.Println()
+
+		// Count events by type
+		eventCounts := countEventTypes(eventPath)
+		if len(eventCounts) > 0 {
+			fmt.Println("Event counts:")
+			for eventType, count := range eventCounts {
+				fmt.Printf("  %-15s %d\n", eventType, count)
+			}
+			fmt.Println()
+		}
+
+		// Show recent events
+		fmt.Println("Recent events (last 10):")
+		if err := tailFile(eventPath, 10); err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading events: %v\n", err)
+		}
+		fmt.Println()
+		fmt.Println("Use 'firebell events -f' to follow in real-time")
+	}
+}
+
+// runWebhookTest tests a webhook endpoint.
+func runWebhookTest(flags *config.Flags) {
+	if flags.WebhookURL == "" {
+		fmt.Fprintln(os.Stderr, "Error: no URL specified")
+		fmt.Fprintln(os.Stderr, "Usage: firebell webhook test <url>")
+		os.Exit(1)
+	}
+
+	fmt.Printf("Testing webhook: %s\n", flags.WebhookURL)
+	fmt.Println()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err := notify.TestWebhook(ctx, flags.WebhookURL, nil, 10*time.Second)
+	if err != nil {
+		fmt.Printf("FAILED: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("SUCCESS: Webhook is working!")
+	fmt.Println()
+	fmt.Println("Add this webhook to your config (~/.firebell/config.yaml):")
+	fmt.Println()
+	fmt.Println("notify:")
+	fmt.Println("  webhooks:")
+	fmt.Printf("    - url: \"%s\"\n", flags.WebhookURL)
+	fmt.Println("      events: [\"all\"]  # or [\"cooling\", \"activity\", \"process_exit\"]")
+}
+
+// countEventTypes counts events by type in the event file.
+func countEventTypes(path string) map[string]int {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	counts := make(map[string]int)
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		// Simple extraction of event type without full JSON parsing
+		// Look for "event":"<type>"
+		if idx := strings.Index(line, `"event":"`); idx != -1 {
+			start := idx + 9
+			end := strings.Index(line[start:], `"`)
+			if end != -1 {
+				eventType := line[start : start+end]
+				counts[eventType]++
+			}
+		}
+	}
+	return counts
+}
+
+// runListen connects to the daemon socket and displays events.
+func runListen(flags *config.Flags) {
+	socketPath := filepath.Join(config.DefaultConfigDir(), "firebell.sock")
+
+	// Check if socket exists
+	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
+		fmt.Println("Socket not found.")
+		fmt.Println()
+		fmt.Printf("Location: %s\n", socketPath)
+		fmt.Println()
+		fmt.Println("The socket is created when firebell daemon runs with socket enabled.")
+		fmt.Println("Enable in config (~/.firebell/config.yaml):")
+		fmt.Println()
+		fmt.Println("daemon:")
+		fmt.Println("  socket: true")
+		fmt.Println()
+		fmt.Println("Then start the daemon:")
+		fmt.Println("  firebell start")
+		return
+	}
+
+	// Connect to socket
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to connect: %v\n", err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+
+	fmt.Printf("Connected to %s\n", socketPath)
+	fmt.Println("Listening for events (Ctrl+C to stop)...")
+	fmt.Println()
+
+	// Handle interrupt
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigCh
+		fmt.Println("\nDisconnected")
+		conn.Close()
+		os.Exit(0)
+	}()
+
+	// Read and display events
+	reader := bufio.NewReader(conn)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				fmt.Println("Connection closed by daemon")
+				return
+			}
+			fmt.Fprintf(os.Stderr, "Read error: %v\n", err)
+			return
+		}
+
+		if flags.ListenJSON {
+			// Raw JSON output
+			fmt.Print(line)
+		} else {
+			// Formatted output
+			formatSocketEvent(line)
+		}
+	}
+}
+
+// formatSocketEvent formats a JSON event line for display.
+func formatSocketEvent(line string) {
+	// Parse the event
+	var event struct {
+		Type      string    `json:"type"`
+		Event     string    `json:"event"`
+		Timestamp time.Time `json:"timestamp"`
+		Agent     string    `json:"agent"`
+		Title     string    `json:"title"`
+		Message   string    `json:"message"`
+	}
+
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		fmt.Print(line) // Fallback to raw
+		return
+	}
+
+	// Handle welcome message
+	if event.Type == "welcome" {
+		return // Skip welcome
+	}
+
+	// Format: [timestamp] Agent: Event - Message
+	ts := event.Timestamp.Format("15:04:05")
+	if event.Agent != "" && event.Event != "" {
+		fmt.Printf("[%s] %s: %s", ts, event.Agent, event.Event)
+		if event.Message != "" {
+			fmt.Printf(" - %s", event.Message)
+		}
+		fmt.Println()
+	} else if event.Title != "" {
+		fmt.Printf("[%s] %s", ts, event.Title)
+		if event.Message != "" {
+			fmt.Printf(" - %s", event.Message)
+		}
+		fmt.Println()
+	}
 }

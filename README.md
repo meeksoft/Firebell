@@ -19,8 +19,9 @@ Requires: Go 1.21+ and Git
 - **Daemon Mode** - Run as background service with singleton enforcement and log management
 - **Command Wrapping** - Wrap any command and monitor its output in real-time
 - **Process Monitoring** - Tracks CPU usage and detects when processes exit
-- **Smart Detection** - Format-aware pattern matching (JSONL for Codex, API events for Copilot)
-- **Completion Detection** - "Likely finished" notifications after quiet periods
+- **Smart Detection** - Format-aware pattern matching (JSONL for Claude/Codex, API events for Copilot)
+- **Completion Detection** - "Cooling" notifications after quiet periods
+- **Awaiting Detection** - Notifications when AI is waiting for input or tool approval
 - **Simple Setup** - Interactive wizard, auto-detection, minimal configuration
 - **Zero Dependencies** - Single Go binary, no runtime requirements
 
@@ -76,6 +77,10 @@ firebell --stdout
 | `firebell logs` | View daemon logs |
 | `firebell logs -f` | Follow daemon logs (like tail -f) |
 | `firebell wrap -- CMD` | Wrap a command and monitor its output |
+| `firebell events` | View event file for external integrations |
+| `firebell events -f` | Follow event file (like tail -f) |
+| `firebell listen` | Connect to daemon socket for real-time events |
+| `firebell webhook test URL` | Test a webhook endpoint |
 | `firebell --setup` | Interactive configuration wizard |
 | `firebell --check` | Health check and status |
 | `firebell --agent NAME` | Monitor specific agent |
@@ -146,14 +151,63 @@ Logs are written in both human-readable and JSON format:
   JSON: {"timestamp":"2025-12-07T10:30:00Z","level":"INFO","message":"firebell daemon starting"}
 ```
 
+## External Integrations
+
+Firebell provides multiple ways for external applications to receive notifications:
+
+### Event File (Default)
+
+Events are automatically written to `~/.firebell/events.jsonl`:
+
+```bash
+# View recent events
+firebell events
+
+# Follow in real-time
+firebell events -f
+
+# Process with jq
+tail -f ~/.firebell/events.jsonl | jq -r '.agent + ": " + .event'
+```
+
+### Webhooks
+
+Send events to HTTP endpoints:
+
+```yaml
+# In ~/.firebell/config.yaml
+notify:
+  webhooks:
+    - url: "http://localhost:8080/firebell"
+      events: ["all"]  # or ["cooling", "activity"]
+```
+
+Test a webhook: `firebell webhook test http://localhost:8080/webhook`
+
+### Unix Socket
+
+Connect to the daemon socket for real-time events:
+
+```bash
+# Enable in config
+daemon:
+  socket: true
+
+# Listen for events
+firebell listen
+firebell listen --json  # Raw JSON output
+```
+
+See [docs/HOOKS.md](docs/HOOKS.md) for complete integration documentation.
+
 ## Supported AI Agents
 
 | Agent | Log Path | Detection Method |
 |-------|----------|------------------|
-| Claude Code | `~/.claude/debug` | Regex pattern matching |
-| GitHub Codex | `~/.codex/sessions` | JSONL parsing |
+| Claude Code | `~/.claude/projects` | JSONL parsing (`stop_reason`) |
+| Codex | `~/.codex/sessions` | JSONL parsing (`function_call`, `output_text`) |
 | GitHub Copilot | `~/.copilot/logs` | API event detection |
-| Google Gemini | `~/.gemini/tmp` | Regex pattern matching |
+| Google Gemini | `~/.gemini/tmp` | JSON pattern matching |
 | OpenCode | `~/.opencode/logs` | Regex pattern matching |
 
 ## Configuration
@@ -209,15 +263,35 @@ Firebell uses `fsnotify` for instant file change detection:
 ### Pattern Matching
 
 Format-aware detection for each agent:
-- **Codex**: Parses JSONL, detects `type:"response_item"` with `role:"assistant"`
+- **Claude Code**: Parses JSONL, detects `stop_reason: "end_turn"` (completion) and `stop_reason: "tool_use"` (awaiting permission)
+- **Codex**: Parses JSONL, detects `output_text` (completion) and `function_call` (awaiting permission)
+- **Gemini**: Pattern matches `type: "gemini"` (completion) and tool names (awaiting permission)
 - **Copilot**: Matches `"chat/completions succeeded"` API events
 - **Others**: Regex matching for `agent_message|assistant_message`
 
+### Notification Types
+
+Firebell sends different notifications based on detected state:
+
+| Notification | Trigger | Description |
+|-------------|---------|-------------|
+| **Cooling** | Quiet period after completion cue | AI finished its turn, likely waiting for your input |
+| **Awaiting** | Quiet period after activity (no completion) | AI stopped mid-task, may be waiting for input |
+| **Holding** | Tool permission request detected | AI needs permission to run a tool (immediate) |
+| **Activity** | AI output detected | AI is actively working (verbose mode only) |
+| **Process Exit** | Monitored process terminated | AI CLI process has exited |
+
 ### Completion Detection
 
-"Likely finished" notifications after quiet periods:
+"Cooling" notifications after quiet periods:
 - Triggers after configurable silence duration (default: 20s)
 - Includes CPU usage if process tracking enabled
+- Requires a "completion cue" (e.g., `end_turn`, `output_text`) before quiet period
+
+### Awaiting & Holding Detection
+
+- **Holding** (immediate): When agent explicitly requests tool permission (`tool_use`, `function_call`)
+- **Awaiting** (inferred): When activity stops without a completion cue (quiet period elapsed)
 
 ### Process Monitoring
 

@@ -29,18 +29,58 @@ type Notifier interface {
 }
 
 // NewNotifier creates the appropriate notifier based on config.
+// If event file or webhooks are enabled, returns a MultiNotifier that sends
+// to the primary notifier plus any secondary notifiers.
 func NewNotifier(cfg *config.Config) (Notifier, error) {
+	return NewNotifierWithExtras(cfg, nil)
+}
+
+// NewNotifierWithExtras creates a notifier with optional extra secondary notifiers.
+// This allows adding notifiers that aren't created from config (like socket notifier).
+func NewNotifierWithExtras(cfg *config.Config, extras []Notifier) (Notifier, error) {
+	// Create primary notifier
+	var primary Notifier
 	switch cfg.Notify.Type {
 	case "slack":
 		if cfg.Notify.Slack.Webhook == "" {
 			return nil, fmt.Errorf("slack webhook URL is required")
 		}
-		return NewSlackNotifier(cfg.Notify.Slack.Webhook), nil
+		primary = NewSlackNotifier(cfg.Notify.Slack.Webhook)
 	case "stdout":
-		return NewStdoutNotifier(), nil
+		primary = NewStdoutNotifier()
 	default:
 		return nil, fmt.Errorf("unknown notification type: %s", cfg.Notify.Type)
 	}
+
+	// Collect secondary notifiers
+	var secondary []Notifier
+
+	// Add event file notifier if enabled
+	if cfg.Daemon.EventFile {
+		eventFile, err := NewEventFileNotifier(cfg.Daemon.EventFilePath, cfg.Daemon.EventFileMaxSize)
+		if err == nil {
+			secondary = append(secondary, eventFile)
+		}
+		// Log warning but continue without event file if it fails
+	}
+
+	// Add webhook notifiers if configured
+	if len(cfg.Notify.Webhooks) > 0 {
+		webhookNotifier := NewWebhookNotifier(cfg.Notify.Webhooks)
+		if webhookNotifier.EndpointCount() > 0 {
+			secondary = append(secondary, webhookNotifier)
+		}
+	}
+
+	// Add extra notifiers (like socket)
+	secondary = append(secondary, extras...)
+
+	// Return multi-notifier if we have secondary notifiers
+	if len(secondary) > 0 {
+		return NewMultiNotifier(primary, secondary...), nil
+	}
+
+	return primary, nil
 }
 
 // FormatNotification formats a notification for display.

@@ -41,50 +41,179 @@ func TestCodexMatcher(t *testing.T) {
 	m := NewCodexMatcher()
 
 	tests := []struct {
-		name  string
-		line  string
-		match bool
+		name      string
+		line      string
+		wantMatch bool
+		wantType  MatchType
+		wantTool  string
 	}{
 		{
-			name:  "valid assistant response",
-			line:  `{"type":"response_item","payload":{"role":"assistant","content":"hello"}}`,
-			match: true,
+			name:      "function_call - awaiting permission",
+			line:      `{"type":"response_item","payload":{"type":"function_call","name":"shell_command","call_id":"call_123"}}`,
+			wantMatch: true,
+			wantType:  MatchHolding,
+			wantTool:  "shell_command",
 		},
 		{
-			name:  "user message - no match",
-			line:  `{"type":"response_item","payload":{"role":"user","content":"hello"}}`,
-			match: false,
+			name:      "assistant message with output_text - turn complete",
+			line:      `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Done!"}]}}`,
+			wantMatch: true,
+			wantType:  MatchComplete,
 		},
 		{
-			name:  "wrong type",
-			line:  `{"type":"request_item","payload":{"role":"assistant"}}`,
-			match: false,
+			name:      "assistant message without output_text - activity",
+			line:      `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"reasoning","text":"thinking..."}]}}`,
+			wantMatch: true,
+			wantType:  MatchActivity,
 		},
 		{
-			name:  "invalid json",
-			line:  `not valid json`,
-			match: false,
+			name:      "user message - no match",
+			line:      `{"type":"response_item","payload":{"type":"message","role":"user","content":"hello"}}`,
+			wantMatch: false,
 		},
 		{
-			name:  "empty line",
-			line:  "",
-			match: false,
+			name:      "wrong type",
+			line:      `{"type":"request_item","payload":{"role":"assistant"}}`,
+			wantMatch: false,
 		},
 		{
-			name:  "whitespace only",
-			line:  "   ",
-			match: false,
+			name:      "event_msg - no match (not response_item)",
+			line:      `{"type":"event_msg","payload":{"type":"agent_message","message":"hello"}}`,
+			wantMatch: false,
+		},
+		{
+			name:      "invalid json",
+			line:      `not valid json`,
+			wantMatch: false,
+		},
+		{
+			name:      "empty line",
+			line:      "",
+			wantMatch: false,
+		},
+		{
+			name:      "whitespace only",
+			line:      "   ",
+			wantMatch: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := m.Match(tt.line)
-			if (result != nil) != tt.match {
-				t.Errorf("Match() = %v, want match=%v", result != nil, tt.match)
+
+			if (result != nil) != tt.wantMatch {
+				t.Errorf("Match() returned %v, want match=%v", result != nil, tt.wantMatch)
+				return
 			}
-			if result != nil && result.Agent != "codex" {
+
+			if result == nil {
+				return
+			}
+
+			if result.Agent != "codex" {
 				t.Errorf("Agent = %q, want 'codex'", result.Agent)
+			}
+
+			if result.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v", result.Type, tt.wantType)
+			}
+
+			if tt.wantTool != "" {
+				tool, ok := result.Meta["tool"].(string)
+				if !ok || tool != tt.wantTool {
+					t.Errorf("Meta[tool] = %q, want %q", tool, tt.wantTool)
+				}
+			}
+		})
+	}
+}
+
+func TestGeminiMatcher(t *testing.T) {
+	m := NewGeminiMatcher()
+
+	tests := []struct {
+		name      string
+		line      string
+		wantMatch bool
+		wantType  MatchType
+		wantTool  string
+	}{
+		{
+			name:      "gemini type - turn complete",
+			line:      `      "type": "gemini",`,
+			wantMatch: true,
+			wantType:  MatchComplete,
+		},
+		{
+			name:      "gemini type compact - turn complete",
+			line:      `{"type":"gemini","content":"hello"}`,
+			wantMatch: true,
+			wantType:  MatchComplete,
+		},
+		{
+			name:      "shell_command tool - awaiting permission",
+			line:      `          "name": "run_shell_command",`,
+			wantMatch: true,
+			wantType:  MatchHolding,
+			wantTool:  "run_shell_command",
+		},
+		{
+			name:      "read_file tool - awaiting permission",
+			line:      `          "name": "read_file",`,
+			wantMatch: true,
+			wantType:  MatchHolding,
+			wantTool:  "read_file",
+		},
+		{
+			name:      "toolCalls array - activity",
+			line:      `      "toolCalls": [`,
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+		{
+			name:      "user type - no match",
+			line:      `      "type": "user",`,
+			wantMatch: false,
+		},
+		{
+			name:      "unrelated name field - no match",
+			line:      `      "name": "some_other_thing",`,
+			wantMatch: false,
+		},
+		{
+			name:      "empty line - no match",
+			line:      "",
+			wantMatch: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := m.Match(tt.line)
+
+			if (result != nil) != tt.wantMatch {
+				t.Errorf("Match() returned %v, want match=%v", result != nil, tt.wantMatch)
+				return
+			}
+
+			if result == nil {
+				return
+			}
+
+			if result.Agent != "gemini" {
+				t.Errorf("Agent = %q, want 'gemini'", result.Agent)
+			}
+
+			if result.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v", result.Type, tt.wantType)
+			}
+
+			if tt.wantTool != "" {
+				tool, ok := result.Meta["tool"].(string)
+				if !ok || tool != tt.wantTool {
+					t.Errorf("Meta[tool] = %q, want %q", tool, tt.wantTool)
+				}
 			}
 		})
 	}
@@ -94,20 +223,48 @@ func TestCopilotMatcher(t *testing.T) {
 	m := NewCopilotMatcher()
 
 	tests := []struct {
-		line  string
-		match bool
+		name      string
+		line      string
+		wantMatch bool
+		wantType  MatchType
 	}{
-		{"chat/completions succeeded", true},
-		{"[info] chat/completions succeeded in 200ms", true},
-		{"chat/completions failed", false},
-		{"random log", false},
+		{
+			name:      "completion success",
+			line:      "chat/completions succeeded",
+			wantMatch: true,
+			wantType:  MatchComplete,
+		},
+		{
+			name:      "completion success with details",
+			line:      "[info] chat/completions succeeded in 200ms",
+			wantMatch: true,
+			wantType:  MatchComplete,
+		},
+		{
+			name:      "completion failed - no match",
+			line:      "chat/completions failed",
+			wantMatch: false,
+		},
+		{
+			name:      "random log - no match",
+			line:      "random log",
+			wantMatch: false,
+		},
 	}
 
 	for _, tt := range tests {
-		result := m.Match(tt.line)
-		if (result != nil) != tt.match {
-			t.Errorf("Match(%q) = %v, want match=%v", tt.line, result != nil, tt.match)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			result := m.Match(tt.line)
+
+			if (result != nil) != tt.wantMatch {
+				t.Errorf("Match() returned %v, want match=%v", result != nil, tt.wantMatch)
+				return
+			}
+
+			if result != nil && result.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v", result.Type, tt.wantType)
+			}
+		})
 	}
 }
 
@@ -118,7 +275,8 @@ func TestComboMatcher(t *testing.T) {
 	)
 
 	t.Run("matches codex json", func(t *testing.T) {
-		result := m.Match(`{"type":"response_item","payload":{"role":"assistant"}}`)
+		// Use valid Codex format with message type and assistant role
+		result := m.Match(`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}}`)
 		if result == nil {
 			t.Error("expected match")
 		}
@@ -143,6 +301,107 @@ func TestComboMatcher(t *testing.T) {
 			t.Error("expected nil for no match")
 		}
 	})
+}
+
+func TestClaudeMatcher(t *testing.T) {
+	m := NewClaudeMatcher()
+
+	tests := []struct {
+		name      string
+		line      string
+		wantMatch bool
+		wantType  MatchType
+		wantTool  string
+	}{
+		{
+			name:      "end_turn - turn complete",
+			line:      `{"type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"Done!"}]}}`,
+			wantMatch: true,
+			wantType:  MatchComplete,
+		},
+		{
+			name:      "tool_use - awaiting permission",
+			line:      `{"type":"assistant","message":{"stop_reason":"tool_use","content":[{"type":"tool_use","name":"Bash","id":"toolu_123"}]}}`,
+			wantMatch: true,
+			wantType:  MatchHolding,
+			wantTool:  "Bash",
+		},
+		{
+			name:      "tool_use with Edit tool",
+			line:      `{"type":"assistant","message":{"stop_reason":"tool_use","content":[{"type":"tool_use","name":"Edit","id":"toolu_456"}]}}`,
+			wantMatch: true,
+			wantType:  MatchHolding,
+			wantTool:  "Edit",
+		},
+		{
+			name:      "no stop_reason - activity",
+			line:      `{"type":"assistant","message":{"content":[{"type":"text","text":"Working..."}]}}`,
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+		{
+			name:      "stop_reason null - activity",
+			line:      `{"type":"assistant","message":{"stop_reason":null,"content":[{"type":"text","text":"Streaming..."}]}}`,
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+		{
+			name:      "user type - no match",
+			line:      `{"type":"user","message":{"content":"hello"}}`,
+			wantMatch: false,
+		},
+		{
+			name:      "system type - no match",
+			line:      `{"type":"system","content":"compacted"}`,
+			wantMatch: false,
+		},
+		{
+			name:      "invalid json - no match",
+			line:      `not valid json`,
+			wantMatch: false,
+		},
+		{
+			name:      "empty line - no match",
+			line:      "",
+			wantMatch: false,
+		},
+		{
+			name:      "assistant without message object - activity",
+			line:      `{"type":"assistant","uuid":"abc123"}`,
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := m.Match(tt.line)
+
+			if (result != nil) != tt.wantMatch {
+				t.Errorf("Match() returned %v, want match=%v", result != nil, tt.wantMatch)
+				return
+			}
+
+			if result == nil {
+				return
+			}
+
+			if result.Agent != "claude" {
+				t.Errorf("Agent = %q, want 'claude'", result.Agent)
+			}
+
+			if result.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v", result.Type, tt.wantType)
+			}
+
+			if tt.wantTool != "" {
+				tool, ok := result.Meta["tool"].(string)
+				if !ok || tool != tt.wantTool {
+					t.Errorf("Meta[tool] = %q, want %q", tool, tt.wantTool)
+				}
+			}
+		})
+	}
 }
 
 func TestCreateMatcher(t *testing.T) {

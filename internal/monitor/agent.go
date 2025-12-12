@@ -30,7 +30,7 @@ var Registry = map[string]Agent{
 	},
 	"codex": {
 		Name:         "codex",
-		DisplayName:  "GitHub Codex",
+		DisplayName:  "Codex",
 		LogPath:      "~/.codex/sessions",
 		LogPatterns:  []string{"*.jsonl", "*.json"},
 		ProcessNames: []string{"codex"},
@@ -46,7 +46,7 @@ var Registry = map[string]Agent{
 		Name:         "gemini",
 		DisplayName:  "Google Gemini",
 		LogPath:      "~/.gemini/tmp",
-		LogPatterns:  []string{"*.log", "*.txt"},
+		LogPatterns:  []string{"*.json"},
 		ProcessNames: []string{"gemini"},
 	},
 	"opencode": {

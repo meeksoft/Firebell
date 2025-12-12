@@ -3,6 +3,8 @@ package monitor
 import (
 	"sync"
 	"time"
+
+	"firebell/internal/detect"
 )
 
 // State holds all runtime monitoring state for firebell.
@@ -17,10 +19,11 @@ type State struct {
 // This replaces the scattered state maps from v1: tailerMap, missingNotified,
 // dedupe, group, lastCue, and quietSent.
 type AgentState struct {
-	Agent        Agent     // Agent definition from registry
-	LastCue      time.Time // Last activity detected (replaces lastCue map)
-	QuietNotified bool     // Whether "likely finished" was sent (replaces quietSent map)
-	WatchedPaths []string  // Currently watched file paths
+	Agent         Agent            // Agent definition from registry
+	LastCue       time.Time        // Last activity detected (replaces lastCue map)
+	LastCueType   detect.MatchType // Type of last cue (Complete, Activity, etc.)
+	QuietNotified bool             // Whether "cooling" was sent (replaces quietSent map)
+	WatchedPaths  []string         // Currently watched file paths
 
 	// Internal state
 	lastNotify time.Time // For potential future deduplication
@@ -101,18 +104,30 @@ func (s *State) GetAllAgents() []*AgentState {
 }
 
 // RecordCue records that activity was detected for an agent.
-func (s *State) RecordCue(agentName string) {
+func (s *State) RecordCue(agentName string, cueType detect.MatchType) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if agent, ok := s.agents[agentName]; ok {
 		agent.LastCue = time.Now()
+		agent.LastCueType = cueType
 		agent.QuietNotified = false // Reset quiet notification
 		agent.lastNotify = time.Now()
 	}
 }
 
-// MarkQuietNotified marks that the "likely finished" notification was sent.
+// GetLastCueType returns the type of the last cue for an agent.
+func (s *State) GetLastCueType(agentName string) detect.MatchType {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if agent, ok := s.agents[agentName]; ok {
+		return agent.LastCueType
+	}
+	return detect.MatchActivity
+}
+
+// MarkQuietNotified marks that the "cooling" notification was sent.
 func (s *State) MarkQuietNotified(agentName string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

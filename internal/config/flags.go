@@ -30,6 +30,18 @@ type Flags struct {
 	DaemonStatus  bool // Show daemon status
 	DaemonLogs    bool // Show/tail logs
 	DaemonFollow  bool // Follow log output (-f)
+
+	// Events subcommand
+	Events       bool // Show event file info
+	EventsFollow bool // Follow event file (-f)
+
+	// Webhook subcommand
+	WebhookTest bool   // Test a webhook URL
+	WebhookURL  string // URL to test
+
+	// Listen subcommand
+	Listen     bool // Listen to socket events
+	ListenJSON bool // Output raw JSON
 }
 
 // ParseFlags parses command-line flags and returns the result.
@@ -52,6 +64,12 @@ func ParseFlags() *Flags {
 			return parseDaemonFlags(flags, "status")
 		case "logs":
 			return parseDaemonFlags(flags, "logs")
+		case "events":
+			return parseEventsFlags(flags)
+		case "webhook":
+			return parseWebhookFlags(flags)
+		case "listen":
+			return parseListenFlags(flags)
 		}
 	}
 
@@ -60,7 +78,7 @@ func ParseFlags() *Flags {
 	flag.BoolVar(&flags.Check, "check", false, "Run health check and exit")
 	flag.StringVar(&flags.Agent, "agent", "", "Filter to specific agent (codex|copilot|claude|gemini|opencode)")
 	flag.BoolVar(&flags.Stdout, "stdout", false, "Output to stdout instead of Slack (for testing)")
-	flag.BoolVar(&flags.Verbose, "verbose", false, "Show all activity notifications (default: only 'likely finished')")
+	flag.BoolVar(&flags.Verbose, "verbose", false, "Show all activity notifications (default: only 'cooling')")
 	flag.BoolVar(&flags.Version, "version", false, "Print version and exit")
 	flag.BoolVar(&flags.Migrate, "migrate", false, "Migrate v1 config to v2 YAML format")
 
@@ -91,7 +109,7 @@ FLAGS:
   --config PATH    Config file (default: ~/.firebell/config.yaml)
   --name NAME      Display name for notifications (default: command name)
   --stdout         Output notifications to stdout instead of Slack
-  --verbose        Show all activity notifications (default: only 'likely finished')
+  --verbose        Show all activity notifications (default: only 'cooling')
 
 EXAMPLES:
   # Wrap Claude Code
@@ -226,6 +244,136 @@ EXAMPLES:
 	return flags
 }
 
+// parseEventsFlags parses flags for the events subcommand.
+func parseEventsFlags(flags *Flags) *Flags {
+	flags.Events = true
+
+	eventsFlags := flag.NewFlagSet("events", flag.ExitOnError)
+	eventsFlags.BoolVar(&flags.EventsFollow, "f", false, "Follow event output")
+
+	eventsFlags.Usage = func() {
+		fmt.Fprintf(os.Stderr, `firebell events - View event file for external integrations
+
+USAGE:
+  firebell events [flags]
+
+FLAGS:
+  -f               Follow event output (like tail -f)
+
+DESCRIPTION:
+  The event file contains JSON events that external applications can consume.
+  Events include: activity, cooling, process_exit, daemon_start, daemon_stop.
+
+  Location: ~/.firebell/events.jsonl
+
+FORMAT:
+  Each line is a JSON object:
+  {"event":"cooling","timestamp":"2025-01-15T10:30:00Z","agent":"Claude Code",...}
+
+EXAMPLES:
+  # Show event file info and recent events
+  firebell events
+
+  # Follow events in real-time
+  firebell events -f
+
+  # Process events with jq
+  tail -f ~/.firebell/events.jsonl | jq -r '.agent + ": " + .event'
+
+`)
+	}
+
+	eventsFlags.Parse(os.Args[2:])
+	return flags
+}
+
+// parseWebhookFlags parses flags for the webhook subcommand.
+func parseWebhookFlags(flags *Flags) *Flags {
+	// Check for "test" subcommand
+	if len(os.Args) > 2 && os.Args[2] == "test" {
+		flags.WebhookTest = true
+
+		webhookFlags := flag.NewFlagSet("webhook test", flag.ExitOnError)
+		webhookFlags.Usage = func() {
+			fmt.Fprintf(os.Stderr, `firebell webhook test - Test a webhook endpoint
+
+USAGE:
+  firebell webhook test <url>
+
+DESCRIPTION:
+  Sends a test event to the specified webhook URL and reports success or failure.
+
+EXAMPLES:
+  # Test a webhook endpoint
+  firebell webhook test http://localhost:8080/webhook
+
+  # Test with HTTPS
+  firebell webhook test https://my-server.com/hooks/firebell
+
+`)
+		}
+
+		webhookFlags.Parse(os.Args[3:])
+		args := webhookFlags.Args()
+		if len(args) > 0 {
+			flags.WebhookURL = args[0]
+		}
+		return flags
+	}
+
+	// Default webhook help
+	fmt.Fprintf(os.Stderr, `firebell webhook - Webhook management commands
+
+USAGE:
+  firebell webhook test <url>    Test a webhook endpoint
+
+EXAMPLES:
+  firebell webhook test http://localhost:8080/webhook
+
+`)
+	os.Exit(0)
+	return flags
+}
+
+// parseListenFlags parses flags for the listen subcommand.
+func parseListenFlags(flags *Flags) *Flags {
+	flags.Listen = true
+
+	listenFlags := flag.NewFlagSet("listen", flag.ExitOnError)
+	listenFlags.BoolVar(&flags.ListenJSON, "json", false, "Output raw JSON")
+
+	listenFlags.Usage = func() {
+		fmt.Fprintf(os.Stderr, `firebell listen - Connect to daemon socket and receive events
+
+USAGE:
+  firebell listen [flags]
+
+FLAGS:
+  --json             Output raw JSON (default: formatted)
+
+DESCRIPTION:
+  Connects to the firebell daemon's Unix socket and displays events in real-time.
+  Requires the daemon to be running with socket enabled (daemon.socket: true).
+
+  Socket location: ~/.firebell/firebell.sock
+
+EXAMPLES:
+  # Listen for events (formatted output)
+  firebell listen
+
+  # Listen with raw JSON output
+  firebell listen --json
+
+  # Pipe to jq for custom processing
+  firebell listen --json | jq '.agent + ": " + .event'
+
+`)
+	}
+
+	listenFlags.Parse(os.Args[2:])
+	return flags
+}
+
 // customUsage provides user-friendly help text.
 func customUsage() {
 	fmt.Fprintf(os.Stderr, `firebell %s - Real-time AI CLI activity monitor`, Version)
@@ -238,6 +386,7 @@ USAGE:
   firebell restart                              Restart daemon
   firebell status                               Show daemon status
   firebell logs [-f]                            View daemon logs
+  firebell events [-f]                          View/follow event file
   firebell wrap [flags] -- <command> [args...]  Wrap a command
 
 GETTING STARTED:
@@ -252,6 +401,11 @@ DAEMON COMMANDS:
   status              Show daemon status (running/stopped, PID, uptime)
   logs                View daemon log file (use -f to follow)
 
+INTEGRATION COMMANDS:
+  events              View/follow event file for external integrations
+  webhook test <url>  Test a webhook endpoint
+  listen              Connect to daemon socket and receive events
+
 OTHER COMMANDS:
   wrap                Wrap a command and monitor its output
 
@@ -261,7 +415,7 @@ FLAGS:
   --check             Health check and exit
   --agent NAME        Filter to specific agent: codex, copilot, claude, gemini, opencode
   --stdout            Output to stdout instead of Slack (for testing)
-  --verbose           Show all activity notifications (default: only 'likely finished')
+  --verbose           Show all activity notifications (default: only 'cooling')
   --version           Print version and exit
   --migrate           Migrate v1 config to v2 YAML format
 

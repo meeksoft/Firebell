@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Development guide for Firebell v2.0.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
@@ -11,23 +11,17 @@ Development guide for Firebell v2.0.
 ## Build & Test Commands
 
 ```bash
-# Build binary to bin/firebell
-make build
+make build              # Build binary to bin/firebell
+make test               # Run all tests
+make install            # Install to ~/.firebell/bin/firebell
+make clean              # Clean artifacts
 
-# Install to ~/.firebell/bin/firebell
-make install
+go test -run TestCodexMatcher ./internal/detect   # Run specific test
+go test -v ./internal/...                         # Tests with verbose output
+go test -cover ./internal/...                     # Tests with coverage
 
-# Run all tests
-make test
-
-# Run specific test
-go test -run TestCodexMatcher ./internal/detect
-
-# Run tests with verbose output
-go test -v ./internal/...
-
-# Clean artifacts
-make clean
+./bin/firebell --check   # Health check
+./bin/firebell --stdout  # Test monitoring output
 ```
 
 ## Architecture
@@ -35,54 +29,28 @@ make clean
 ### Directory Structure
 
 ```
-cmd/firebell/main.go              # Entry point (~150 lines)
+cmd/firebell/main.go     # Entry point, flag dispatch, signal handling
 
 internal/
-├── config/
-│   ├── config.go       # Config type definitions
-│   ├── loader.go       # YAML/JSON loading with v1 migration
-│   ├── flags.go        # CLI flags + subcommands
-│   └── setup.go        # Interactive --setup wizard
-│
-├── monitor/
-│   ├── agent.go        # Centralized agent registry
-│   ├── state.go        # Consolidated AgentState (replaces 6 v1 maps)
-│   ├── watcher.go      # Event-driven fsnotify watcher
-│   ├── tailer.go       # Log tailing with buffer pool
-│   └── process.go      # PID monitoring with caching
-│
-├── detect/
-│   └── matcher.go      # Matcher interface + implementations
-│
-├── notify/
-│   ├── notifier.go     # Notifier interface + formatting
-│   ├── slack.go        # Slack webhook
-│   └── stdout.go       # Terminal output
-│
-├── wrap/
-│   ├── pty.go          # Pseudo-terminal handling
-│   └── runner.go       # Command wrapping + monitoring
-│
-├── daemon/
-│   ├── lock.go         # flock-based singleton
-│   ├── daemon.go       # Daemonization logic
-│   ├── logger.go       # Log file management
-│   └── cleanup.go      # Log retention cleanup
-│
-└── util/
-    └── buffers.go      # sync.Pool buffer reuse
+├── config/              # Config types, YAML loading, CLI flags, setup wizard
+├── monitor/             # Agent registry, state, fsnotify watcher, tailer, process tracking
+├── detect/              # Matcher interface + agent-specific implementations
+├── notify/              # Notifier interface, Slack webhook, stdout output
+├── wrap/                # PTY handling, command wrapping with output monitoring
+├── daemon/              # flock singleton, daemonization, log management, cleanup
+└── util/                # sync.Pool buffer reuse
 ```
 
 ### Key Design Decisions
 
 1. **Event-driven architecture**: Uses fsnotify for <50ms latency (vs 800ms polling in v1)
 2. **Consolidated state**: Single `AgentState` struct replaces 6 scattered maps
-3. **Centralized registry**: One place to add new AI agents
+3. **Centralized registry**: One place to add new AI agents (`monitor/agent.go`)
 4. **5 CLI flags**: Down from 23 in v1, config file for advanced options
 
-### Agent Registry (monitor/agent.go)
+### Adding a New AI Agent
 
-Adding a new AI agent:
+Add to the registry in `monitor/agent.go`:
 
 ```go
 var Registry = map[string]Agent{
@@ -95,6 +63,8 @@ var Registry = map[string]Agent{
 }
 ```
 
+Then add a matcher in `detect/matcher.go` if custom parsing is needed.
+
 ### Pattern Matching (detect/matcher.go)
 
 ```go
@@ -102,39 +72,40 @@ type Matcher interface {
     Match(line string) *Match
 }
 
+type MatchType int
+const (
+    MatchActivity // Normal activity (no completion signal)
+    MatchComplete // Turn complete (triggers Cooling after quiet)
+    MatchAwaiting // Explicit waiting for user input
+    MatchHolding  // Waiting for tool approval (immediate notification)
+)
+
 // Implementations:
-// - RegexMatcher: General pattern matching
-// - CodexMatcher: JSONL parsing for Codex
+// - ClaudeMatcher: JSONL parsing with stop_reason detection
+// - CodexMatcher: JSONL parsing for function_call/output_text
+// - GeminiMatcher: JSON pattern matching for type/tool names
 // - CopilotMatcher: API event detection
+// - RegexMatcher: General pattern matching
 // - ComboMatcher: Try multiple matchers in sequence
 ```
 
 ### Event Loop (monitor/watcher.go)
 
-```go
-func (w *Watcher) Run(ctx context.Context) error {
-    for {
-        select {
-        case <-ctx.Done():
-            return ctx.Err()
-        case <-w.pidDone:
-            w.handleProcessExit(ctx)
-        case event := <-w.fsw.Events:
-            w.handleFSEvent(ctx, event)
-        case <-refreshTicker.C:
-            w.refreshFiles()
-        case <-quietTicker.C:
-            w.checkQuietPeriods(ctx)
-        case <-procTicker.C:
-            w.sampleProcess(ctx)
-        }
-    }
-}
-```
+The main monitoring loop handles: fsnotify events, process exit detection, file refresh, quiet period checks, and process sampling.
+
+### Notification Logic (monitor/watcher.go, monitor/state.go)
+
+Firebell tracks the last cue type per agent to determine notification type after quiet period:
+
+- **MatchComplete** → After quiet period → "Cooling" notification
+- **MatchActivity** → After quiet period → "Awaiting" notification (inferred)
+- **MatchHolding** → Immediate "Holding" notification
+
+State tracks: `LastCue` (timestamp), `LastCueType` (MatchType), `QuietNotified` (bool)
 
 ## Configuration
 
-### Config File (~/.firebell/config.yaml)
+Config file: `~/.firebell/config.yaml`
 
 ```yaml
 version: "2"
@@ -148,16 +119,9 @@ monitor:
   process_tracking: true
   completion_detection: true
   quiet_seconds: 20
-output:
-  verbosity: normal
-  include_snippets: true
-advanced:
-  poll_interval_ms: 800
-  max_recent_files: 3
-  force_polling: false
 ```
 
-### CLI Flags
+### CLI Flags & Subcommands
 
 ```
 --config PATH    Config file path
@@ -165,133 +129,20 @@ advanced:
 --check          Health check
 --agent NAME     Filter to specific agent
 --stdout         Output to stdout
---verbose        Show all activity (default: only 'likely finished')
---version        Print version
---migrate        Migrate v1 config
+--verbose        Show all activity (default: only 'cooling')
+
+wrap             Wrap command and monitor output
+start/stop       Daemon control
+status/logs      Daemon info
 ```
 
-### Subcommands
+## Coding Style
 
-```
-wrap             Wrap a command and monitor its output
-                 Usage: firebell wrap [flags] -- <command> [args...]
-                 Flags: --config, --name, --stdout, --verbose
-
-start            Start daemon in background
-stop             Stop running daemon
-restart          Restart daemon
-status           Show daemon status
-logs             View daemon logs (use -f to follow)
-```
-
-### Notification Behavior
-
-By default, firebell sends **only "likely finished" notifications** (when AI activity stops for the quiet period). This prevents notification spam while still alerting you when your AI is done.
-
-| Mode              | Behavior |
-|-------------------|----------|
-| Slack (default)   | Only "likely finished" notifications |
-| stdout (normal)   | Only "likely finished" notifications |
-| stdout --verbose  | All activity + "likely finished" |
-
-Use `--verbose` when you want to see every AI response detection in real-time (useful for debugging or active monitoring).
-
-## Testing
-
-```bash
-# All tests
-go test ./internal/...
-
-# Specific package
-go test ./internal/detect -v
-
-# Run with coverage
-go test -cover ./internal/...
-```
-
-### Test Files
-
-```
-internal/config/config_test.go    # Config validation
-internal/detect/matcher_test.go   # Pattern matching
-internal/monitor/agent_test.go    # Agent registry
-internal/monitor/state_test.go    # State management
-internal/monitor/process_test.go  # Process monitoring
-internal/notify/notifier_test.go  # Notification formatting
-internal/util/buffers_test.go     # Buffer pool
-internal/wrap/runner_test.go      # Command wrapping
-internal/daemon/daemon_test.go    # Daemon functionality
-```
-
-## Key Files Reference
-
-### cmd/firebell/main.go
-- Entry point, flag dispatch, signal handling
-
-### internal/config/config.go
-- `Config` struct with all settings
-- `Validate()` for config validation
-
-### internal/config/loader.go
-- `Load()`: YAML/JSON loading with v1 migration
-- `Save()`: Write config to YAML
-- `MigrateConfig()`: Convert v1 JSON to v2 YAML
-
-### internal/monitor/agent.go
-- `Registry`: Map of all supported agents
-- `DetectActiveAgents()`: Find agents with recent logs
-- `GetAgent()`: Look up by name
-
-### internal/monitor/watcher.go
-- `Watcher`: Main monitoring struct
-- `Run()`: fsnotify event loop
-- `RunPolling()`: Fallback polling mode
-
-### internal/monitor/process.go
-- `ProcessMonitor`: PID tracking with caching
-- `ReadProcSample()`: Parse /proc/{pid}/stat
-- `WatchPID()`: Background exit detection
-
-### internal/detect/matcher.go
-- `Matcher` interface
-- `CreateMatcher()`: Factory for agent-specific matchers
-
-### internal/wrap/pty.go
-- `PTY`: Pseudo-terminal wrapper for interactive commands
-- `Start()`: Start command with PTY
-- `Wait()`: Wait for command exit
-
-### internal/wrap/runner.go
-- `Runner`: Command wrapper with output monitoring
-- `Run()`: Execute command and monitor output
-- `monitorOutput()`: Pattern matching on stdout
-
-### internal/daemon/lock.go
-- `Lock`: flock-based singleton lock
-- `TryLock()`: Acquire exclusive lock
-- `IsRunning()`: Check if daemon running
-
-### internal/daemon/daemon.go
-- `Daemon`: Daemon lifecycle manager
-- `Start()`: Start daemon in background
-- `Stop()`: Stop running daemon
-- `Status()`: Get daemon status
-
-### internal/daemon/logger.go
-- `Logger`: Log file management with rotation
-- `Log()`: Write log entry (text + JSON)
-- `LogEvent()`: Write event with agent context
-
-### internal/daemon/cleanup.go
-- `CleanupLogs()`: Remove old log files
-- `GetLogFiles()`: List log files
-
-## Performance Notes
-
-- **Idle CPU**: <0.5% (event-driven)
-- **Notification latency**: <50ms with fsnotify
-- **Memory**: ~15MB RSS
-- **File handles**: One per watched file
+- Go 1.21+, format with `gofmt`, keep imports tidy
+- Keep packages focused and side-effect free
+- Config structs and CLI flags should use explicit defaults
+- User-facing strings should include dynamic version (set via `-ldflags` in Makefile)
+- Table-driven tests for matchers and detectors
 
 ## Constraints
 
@@ -299,10 +150,8 @@ internal/daemon/daemon_test.go    # Daemon functionality
 - **Text logs only**: Binary logs not supported
 - **Max depth**: 4 levels of directory traversal
 
-## Development Workflow
+## Commit Guidelines
 
-1. Make changes
-2. Run tests: `make test`
-3. Build: `make build`
-4. Test manually: `./bin/firebell --check`
-5. Test monitoring: `./bin/firebell --stdout`
+- Short, present-tense summaries
+- Tag releases with `vX.Y.Z: <change>` when bumping versions
+- Do not commit `bin/` artifacts

@@ -96,8 +96,8 @@ func (r *Runner) monitorOutput(ctx context.Context, reader io.Reader) {
 	scanner.Buffer(buf, 1024*1024)
 
 	// Determine if we should send activity notifications
-	// - Slack: Never send activity notifications (only "likely finished")
-	// - stdout normal: Only send "likely finished" notifications
+	// - Slack: Never send activity notifications (only "cooling")
+	// - stdout normal: Only send "cooling" notifications
 	// - stdout verbose: Send all activity notifications
 	sendActivity := r.cfg.Notify.Type == "stdout" && r.cfg.Output.Verbosity == "verbose"
 

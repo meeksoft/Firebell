@@ -123,8 +123,8 @@ func TestNewNotificationFromMatch(t *testing.T) {
 func TestNewQuietNotification(t *testing.T) {
 	t.Run("without CPU", func(t *testing.T) {
 		n := NewQuietNotification("Claude Code", -1)
-		if n.Title != "Likely Finished" {
-			t.Errorf("Title = %q, want 'Likely Finished'", n.Title)
+		if n.Title != "Cooling" {
+			t.Errorf("Title = %q, want 'Cooling'", n.Title)
 		}
 		if containsSubstr(n.Message, "CPU") {
 			t.Error("should not contain CPU when cpuPct < 0")

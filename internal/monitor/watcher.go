@@ -205,8 +205,8 @@ func (w *Watcher) processLines(ctx context.Context, agentName, path string, line
 	}
 
 	// Determine if we should send activity notifications
-	// - Slack: Never send activity notifications (only "likely finished")
-	// - stdout normal: Only send "likely finished" notifications
+	// - Slack: Never send activity notifications (only "cooling")
+	// - stdout normal: Only send "cooling" notifications
 	// - stdout verbose: Send all activity notifications
 	sendActivity := w.cfg.Notify.Type == "stdout" && w.cfg.Output.Verbosity == "verbose"
 
@@ -220,30 +220,102 @@ func (w *Watcher) processLines(ctx context.Context, agentName, path string, line
 			continue
 		}
 
-		// Always record the cue (for quiet period tracking)
-		w.state.RecordCue(agentName)
+		// Handle based on match type
+		switch match.Type {
+		case detect.MatchComplete:
+			// Turn complete - record cue for quiet period tracking
+			// After quiet period, this will trigger "Cooling"
+			w.state.RecordCue(agentName, detect.MatchComplete)
 
-		// Only send activity notification if verbose stdout mode
-		if !sendActivity {
-			continue
+			// Only send activity notification if verbose stdout mode
+			if sendActivity {
+				n := notify.NewNotificationFromMatch(
+					agentName,
+					agentState.Agent.DisplayName,
+					match.Reason,
+					match.Line,
+				)
+				if w.cfg.Output.IncludeSnippets {
+					n.Snippet = TailSnippet(path, w.cfg.Output.SnippetLines, 500)
+				}
+				if err := w.notifier.Send(ctx, n); err != nil {
+					fmt.Fprintf(os.Stderr, "Failed to send notification: %v\n", err)
+				}
+			}
+
+		case detect.MatchHolding:
+			// Holding for tool permission - send notification immediately with tool name
+			// Also record cue so quiet period tracking works
+			w.state.RecordCue(agentName, detect.MatchHolding)
+
+			toolName := "unknown"
+			if match.Meta != nil {
+				if t, ok := match.Meta["tool"].(string); ok {
+					toolName = t
+				}
+			}
+			w.sendHoldingNotification(ctx, agentState.Agent.DisplayName, toolName)
+
+		case detect.MatchAwaiting:
+			// Explicit awaiting (rare - most agents use MatchComplete + quiet period)
+			w.state.RecordCue(agentName, detect.MatchAwaiting)
+			w.sendAwaitingNotification(ctx, agentState.Agent.DisplayName, "Awaiting", "Ready for your input")
+
+		case detect.MatchActivity:
+			// Normal activity (no completion signal) - record cue for quiet period tracking
+			// After quiet period without a MatchComplete, this will trigger inferred "Awaiting"
+			w.state.RecordCue(agentName, detect.MatchActivity)
+
+			// Only send activity notification if verbose stdout mode
+			if !sendActivity {
+				continue
+			}
+
+			// Create and send notification
+			n := notify.NewNotificationFromMatch(
+				agentName,
+				agentState.Agent.DisplayName,
+				match.Reason,
+				match.Line,
+			)
+
+			// Add snippet if configured
+			if w.cfg.Output.IncludeSnippets {
+				n.Snippet = TailSnippet(path, w.cfg.Output.SnippetLines, 500)
+			}
+
+			if err := w.notifier.Send(ctx, n); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to send notification: %v\n", err)
+			}
 		}
+	}
+}
 
-		// Create and send notification
-		n := notify.NewNotificationFromMatch(
-			agentName,
-			agentState.Agent.DisplayName,
-			match.Reason,
-			match.Line,
-		)
+// sendHoldingNotification sends a holding notification immediately when tool permission is needed.
+func (w *Watcher) sendHoldingNotification(ctx context.Context, displayName, toolName string) {
+	n := &notify.Notification{
+		Agent:   displayName,
+		Title:   "Holding",
+		Message: fmt.Sprintf("Tool: %s", toolName),
+		Time:    time.Now(),
+	}
 
-		// Add snippet if configured
-		if w.cfg.Output.IncludeSnippets {
-			n.Snippet = TailSnippet(path, w.cfg.Output.SnippetLines, 500)
-		}
+	if err := w.notifier.Send(ctx, n); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to send holding notification: %v\n", err)
+	}
+}
 
-		if err := w.notifier.Send(ctx, n); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to send notification: %v\n", err)
-		}
+// sendAwaitingNotification sends an awaiting notification immediately.
+func (w *Watcher) sendAwaitingNotification(ctx context.Context, displayName, title, message string) {
+	n := &notify.Notification{
+		Agent:   displayName,
+		Title:   title,
+		Message: message,
+		Time:    time.Now(),
+	}
+
+	if err := w.notifier.Send(ctx, n); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to send awaiting notification: %v\n", err)
 	}
 }
 
@@ -256,6 +328,8 @@ func (w *Watcher) refreshFiles() {
 }
 
 // checkQuietPeriods checks for quiet period notifications.
+// Sends "Cooling" if last cue was MatchComplete (turn finished).
+// Sends "Awaiting" if last cue was MatchActivity (no completion signal - inferred waiting).
 func (w *Watcher) checkQuietPeriods(ctx context.Context) {
 	if !w.cfg.Monitor.CompletionDetection {
 		return
@@ -271,8 +345,38 @@ func (w *Watcher) checkQuietPeriods(ctx context.Context) {
 
 	for _, agentState := range w.state.GetAllAgents() {
 		if w.state.ShouldSendQuiet(agentState.Agent.Name, quietDuration) {
-			// Send quiet notification with CPU info
-			n := notify.NewQuietNotification(agentState.Agent.DisplayName, cpuPct)
+			// Determine notification type based on last cue type
+			lastCueType := w.state.GetLastCueType(agentState.Agent.Name)
+
+			var n *notify.Notification
+			switch lastCueType {
+			case detect.MatchComplete:
+				// Turn was completed - send "Cooling" notification
+				n = notify.NewQuietNotification(agentState.Agent.DisplayName, cpuPct)
+
+			case detect.MatchActivity:
+				// Activity without completion signal - infer "Awaiting"
+				// This happens when agent stops mid-turn (likely waiting for permission or blocked)
+				n = &notify.Notification{
+					Agent:   agentState.Agent.DisplayName,
+					Title:   "Awaiting",
+					Message: "No activity detected (may be waiting for input)",
+					Time:    time.Now(),
+				}
+
+			case detect.MatchHolding:
+				// Already sent immediate notification, but still quiet - resend reminder
+				n = &notify.Notification{
+					Agent:   agentState.Agent.DisplayName,
+					Title:   "Holding",
+					Message: "Still waiting for tool approval",
+					Time:    time.Now(),
+				}
+
+			default:
+				// Default to Cooling for any other case
+				n = notify.NewQuietNotification(agentState.Agent.DisplayName, cpuPct)
+			}
 
 			if err := w.notifier.Send(ctx, n); err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to send notification: %v\n", err)

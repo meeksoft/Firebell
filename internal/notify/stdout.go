@@ -75,14 +75,14 @@ func NewNotificationFromMatch(agentName, displayName, reason, line string) *Noti
 	}
 }
 
-// NewQuietNotification creates a "likely finished" notification.
+// NewQuietNotification creates a "cooling" notification.
 func NewQuietNotification(displayName string, cpuPct float64) *Notification {
 	msg := "No activity detected for quiet period"
 	if cpuPct >= 0 {
 		msg = fmt.Sprintf("No activity detected (CPU: %.1f%%)", cpuPct)
 	}
 	return &Notification{
-		Title:   "Likely Finished",
+		Title:   "Cooling",
 		Agent:   displayName,
 		Message: msg,
 		Time:    time.Now(),

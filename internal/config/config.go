@@ -20,12 +20,30 @@ type Config struct {
 // DaemonConfig defines daemon mode settings.
 type DaemonConfig struct {
 	LogRetentionDays int `yaml:"log_retention_days" json:"log_retention_days"` // Days to keep logs (0 = forever)
+
+	// Event file settings for external integrations
+	EventFile        bool   `yaml:"event_file" json:"event_file"`                 // Enable event file output
+	EventFilePath    string `yaml:"event_file_path" json:"event_file_path"`       // Path to event file (default: ~/.firebell/events.jsonl)
+	EventFileMaxSize int64  `yaml:"event_file_max_size" json:"event_file_max_size"` // Max size in bytes before rotation (default: 10MB)
+
+	// Unix socket settings for external integrations
+	Socket     bool   `yaml:"socket" json:"socket"`           // Enable Unix socket listener
+	SocketPath string `yaml:"socket_path" json:"socket_path"` // Path to socket (default: ~/.firebell/firebell.sock)
 }
 
 // NotifyConfig defines notification destination and settings.
 type NotifyConfig struct {
-	Type  string      `yaml:"type" json:"type"` // "slack" or "stdout"
-	Slack SlackConfig `yaml:"slack,omitempty" json:"slack,omitempty"`
+	Type     string          `yaml:"type" json:"type"` // "slack" or "stdout"
+	Slack    SlackConfig     `yaml:"slack,omitempty" json:"slack,omitempty"`
+	Webhooks []WebhookConfig `yaml:"webhooks,omitempty" json:"webhooks,omitempty"` // Additional webhook endpoints
+}
+
+// WebhookConfig defines a webhook endpoint for notifications.
+type WebhookConfig struct {
+	URL     string            `yaml:"url" json:"url"`
+	Events  []string          `yaml:"events,omitempty" json:"events,omitempty"`   // Event types to send (empty = all)
+	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"` // Custom HTTP headers
+	Timeout int               `yaml:"timeout,omitempty" json:"timeout,omitempty"` // Timeout in seconds (default: 10)
 }
 
 // SlackConfig holds Slack-specific notification settings.
@@ -84,6 +102,9 @@ func DefaultConfig() *Config {
 		},
 		Daemon: DaemonConfig{
 			LogRetentionDays: 7,
+			EventFile:        true,                    // Enable by default
+			EventFileMaxSize: 10 * 1024 * 1024,        // 10MB
+			Socket:           false,                   // Disabled by default
 		},
 		Advanced: AdvancedConfig{
 			PollIntervalMS: 800,

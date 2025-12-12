@@ -3,6 +3,8 @@ package monitor
 import (
 	"testing"
 	"time"
+
+	"firebell/internal/detect"
 )
 
 func TestState(t *testing.T) {
@@ -35,7 +37,7 @@ func TestState(t *testing.T) {
 		s.AddAgent(Agent{Name: "claude"})
 
 		before := time.Now()
-		s.RecordCue("claude")
+		s.RecordCue("claude", detect.MatchComplete)
 		after := time.Now()
 
 		state := s.GetAgent("claude")
@@ -45,6 +47,9 @@ func TestState(t *testing.T) {
 		if state.QuietNotified {
 			t.Error("QuietNotified should be cleared on cue")
 		}
+		if state.LastCueType != detect.MatchComplete {
+			t.Errorf("LastCueType = %v, want MatchComplete", state.LastCueType)
+		}
 	})
 
 	t.Run("quiet notification lifecycle", func(t *testing.T) {
@@ -52,7 +57,7 @@ func TestState(t *testing.T) {
 		s.AddAgent(Agent{Name: "claude"})
 
 		// Record activity
-		s.RecordCue("claude")
+		s.RecordCue("claude", detect.MatchComplete)
 
 		// Should not send quiet immediately
 		if s.ShouldSendQuiet("claude", 1*time.Second) {
@@ -77,7 +82,7 @@ func TestState(t *testing.T) {
 		}
 
 		// New cue resets
-		s.RecordCue("claude")
+		s.RecordCue("claude", detect.MatchActivity)
 		state = s.GetAgent("claude")
 		if state.QuietNotified {
 			t.Error("QuietNotified should be cleared after new cue")
