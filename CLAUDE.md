@@ -83,8 +83,12 @@ const (
 // Implementations:
 // - ClaudeMatcher: JSONL parsing with stop_reason detection
 // - CodexMatcher: JSONL parsing for function_call/output_text
+// - CopilotMatcher: JSONL parsing for assistant.turn_end/toolRequests
 // - GeminiMatcher: JSON pattern matching for type/tool names
-// - CopilotMatcher: API event detection
+// - QwenMatcher: OpenAI API JSONL parsing (finish_reason/tool_calls)
+// - OpenCodeMatcher: Pattern matching for sst/opencode logs
+// - CrushMatcher: slog/JSON parsing for Charmbracelet Crush
+// - AmazonQMatcher: Pattern matching for Amazon Q CLI logs
 // - RegexMatcher: General pattern matching
 // - ComboMatcher: Try multiple matchers in sequence
 ```
@@ -99,7 +103,9 @@ Firebell tracks the last cue type per agent to determine notification type after
 
 - **MatchComplete** → After quiet period → "Cooling" notification
 - **MatchActivity** → After quiet period → "Awaiting" notification (inferred)
-- **MatchHolding** → Immediate "Holding" notification
+- **MatchHolding** → After quiet period → "Holding" notification (tool permission pending)
+
+Note: Strong cues (MatchComplete, MatchHolding) are not overwritten by MatchActivity.
 
 State tracks: `LastCue` (timestamp), `LastCueType` (MatchType), `QuietNotified` (bool)
 

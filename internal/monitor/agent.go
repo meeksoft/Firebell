@@ -52,9 +52,30 @@ var Registry = map[string]Agent{
 	"opencode": {
 		Name:         "opencode",
 		DisplayName:  "OpenCode",
-		LogPath:      "~/.opencode/logs",
+		LogPath:      "~/.local/share/opencode/log",
 		LogPatterns:  []string{"*.log"},
 		ProcessNames: []string{"opencode"},
+	},
+	"crush": {
+		Name:         "crush",
+		DisplayName:  "Crush",
+		LogPath:      "~/.local/share/crush",
+		LogPatterns:  []string{"*.log", "*.jsonl"},
+		ProcessNames: []string{"crush"},
+	},
+	"qwen": {
+		Name:         "qwen",
+		DisplayName:  "Qwen Code",
+		LogPath:      "~/.qwen/logs/openai",
+		LogPatterns:  []string{"*.jsonl", "*.json"},
+		ProcessNames: []string{"qwen", "qwen-code"},
+	},
+	"amazonq": {
+		Name:         "amazonq",
+		DisplayName:  "Amazon Q",
+		LogPath:      "~/.local/state/amazonq/logs",
+		LogPatterns:  []string{"*.log"},
+		ProcessNames: []string{"q", "amazonq"},
 	},
 }
 

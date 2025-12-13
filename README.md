@@ -2,7 +2,7 @@
 
 **Real-time activity monitoring for AI CLI tools**
 
-Firebell watches log files from AI coding assistants (Claude Code, GitHub Codex, GitHub Copilot, Gemini, OpenCode) and sends notifications when activity is detected. Know when your AI assistant is working, idle, or finished—without checking the terminal.
+Firebell watches log files from AI coding assistants (Claude Code, Codex, GitHub Copilot, Gemini CLI, OpenCode, Crush, Qwen Code, Amazon Q) and sends notifications when activity is detected. Know when your AI assistant is working, idle, or finished—without checking the terminal.
 
 ## Quick Install
 
@@ -14,7 +14,7 @@ Requires: Go 1.21+ and Git
 
 ## Features
 
-- **Multi-CLI Support** - Monitors Claude Code, GitHub Codex, Copilot, Gemini, and OpenCode
+- **Multi-CLI Support** - Monitors Claude Code, Codex, Copilot, Gemini, OpenCode, Crush, Qwen Code, Amazon Q
 - **Event-Driven** - Uses fsnotify for instant notifications (<50ms latency)
 - **Daemon Mode** - Run as background service with singleton enforcement and log management
 - **Command Wrapping** - Wrap any command and monitor its output in real-time
@@ -206,9 +206,12 @@ See [docs/HOOKS.md](docs/HOOKS.md) for complete integration documentation.
 |-------|----------|------------------|
 | Claude Code | `~/.claude/projects` | JSONL parsing (`stop_reason`) |
 | Codex | `~/.codex/sessions` | JSONL parsing (`function_call`, `output_text`) |
-| GitHub Copilot | `~/.copilot/logs` | API event detection |
+| GitHub Copilot | `~/.copilot/session-state` | JSONL parsing (`assistant.turn_end`, `toolRequests`) |
 | Google Gemini | `~/.gemini/tmp` | JSON pattern matching |
-| OpenCode | `~/.opencode/logs` | Regex pattern matching |
+| OpenCode | `~/.local/share/opencode/log` | Pattern matching |
+| Crush | `~/.local/share/crush` | slog/JSON parsing |
+| Qwen Code | `~/.qwen/logs/openai` | OpenAI API JSONL parsing |
+| Amazon Q | `~/.local/state/amazonq/logs` | Pattern matching |
 
 ## Configuration
 
@@ -263,10 +266,14 @@ Firebell uses `fsnotify` for instant file change detection:
 ### Pattern Matching
 
 Format-aware detection for each agent:
-- **Claude Code**: Parses JSONL, detects `stop_reason: "end_turn"` (completion) and `stop_reason: "tool_use"` (awaiting permission)
-- **Codex**: Parses JSONL, detects `output_text` (completion) and `function_call` (awaiting permission)
-- **Gemini**: Pattern matches `type: "gemini"` (completion) and tool names (awaiting permission)
-- **Copilot**: Matches `"chat/completions succeeded"` API events
+- **Claude Code**: Parses JSONL, detects `stop_reason: "end_turn"` (completion) and `stop_reason: "tool_use"` (holding)
+- **Codex**: Parses JSONL, detects `output_text` (completion) and `function_call` (holding)
+- **Copilot**: Parses session-state JSONL, detects `assistant.turn_end` (completion) and `toolRequests` (holding)
+- **Gemini**: Pattern matches `type: "gemini"` (completion) and tool names (holding)
+- **Qwen Code**: Parses OpenAI API logs, detects `finish_reason: "stop"` (completion) and `tool_calls` (holding)
+- **OpenCode**: Pattern matches `turn.complete` (completion) and `tool.confirm` (holding)
+- **Crush**: Parses slog JSON, detects completion and tool confirmation patterns
+- **Amazon Q**: Pattern matches response/chat events and tool permissions
 - **Others**: Regex matching for `agent_message|assistant_message`
 
 ### Notification Types

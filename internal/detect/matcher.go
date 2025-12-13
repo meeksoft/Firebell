@@ -468,6 +468,333 @@ func (m *CopilotMatcher) Match(line string) *Match {
 	return nil
 }
 
+// QwenMatcher detects Qwen Code activity from OpenAI API logs.
+// Qwen Code is a fork of Gemini CLI that logs OpenAI-compatible API calls.
+// Logs are JSONL format with request/response data.
+type QwenMatcher struct {
+	agent string
+}
+
+// NewQwenMatcher creates a new Qwen Code-specific matcher.
+func NewQwenMatcher() *QwenMatcher {
+	return &QwenMatcher{agent: "qwen"}
+}
+
+// Match implements Matcher for QwenMatcher.
+func (m *QwenMatcher) Match(line string) *Match {
+	// Skip empty lines
+	if len(strings.TrimSpace(line)) == 0 {
+		return nil
+	}
+
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &obj); err != nil {
+		return nil
+	}
+
+	// Check for response object with choices
+	if choices, ok := obj["choices"].([]interface{}); ok && len(choices) > 0 {
+		if choice, ok := choices[0].(map[string]interface{}); ok {
+			// Check finish_reason for completion detection
+			if finishReason, ok := choice["finish_reason"].(string); ok {
+				switch finishReason {
+				case "stop":
+					return &Match{
+						Agent:  m.agent,
+						Type:   MatchComplete,
+						Reason: "response complete",
+						Line:   line,
+						Meta:   obj,
+					}
+				case "tool_calls", "function_call":
+					// Extract tool name if available
+					meta := obj
+					if message, ok := choice["message"].(map[string]interface{}); ok {
+						if toolCalls, ok := message["tool_calls"].([]interface{}); ok && len(toolCalls) > 0 {
+							if tc, ok := toolCalls[0].(map[string]interface{}); ok {
+								if fn, ok := tc["function"].(map[string]interface{}); ok {
+									if name, ok := fn["name"].(string); ok {
+										if meta == nil {
+											meta = make(map[string]interface{})
+										}
+										meta["tool"] = name
+									}
+								}
+							}
+						}
+					}
+					return &Match{
+						Agent:  m.agent,
+						Type:   MatchHolding,
+						Reason: "tool call",
+						Line:   line,
+						Meta:   meta,
+					}
+				}
+			}
+			// No finish_reason = still streaming
+			return &Match{
+				Agent:  m.agent,
+				Type:   MatchActivity,
+				Reason: "response chunk",
+				Line:   line,
+				Meta:   obj,
+			}
+		}
+	}
+
+	// Check for request logging (messages array = new request)
+	if _, ok := obj["messages"]; ok {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchActivity,
+			Reason: "request",
+			Line:   line,
+			Meta:   obj,
+		}
+	}
+
+	return nil
+}
+
+// OpenCodeMatcher detects SST OpenCode activity from log files.
+// OpenCode logs are timestamped text files with structured messages.
+type OpenCodeMatcher struct {
+	agent string
+}
+
+// NewOpenCodeMatcher creates a new OpenCode-specific matcher.
+func NewOpenCodeMatcher() *OpenCodeMatcher {
+	return &OpenCodeMatcher{agent: "opencode"}
+}
+
+// Match implements Matcher for OpenCodeMatcher.
+func (m *OpenCodeMatcher) Match(line string) *Match {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) == 0 {
+		return nil
+	}
+
+	// OpenCode logs various events - look for key patterns
+	// Tool execution patterns
+	if strings.Contains(line, "tool.execute") || strings.Contains(line, "executing tool") {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchActivity,
+			Reason: "tool execution",
+			Line:   line,
+		}
+	}
+
+	// Tool permission/confirmation patterns
+	if strings.Contains(line, "tool.confirm") || strings.Contains(line, "awaiting confirmation") ||
+		strings.Contains(line, "permission") {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchHolding,
+			Reason: "tool confirmation",
+			Line:   line,
+		}
+	}
+
+	// Turn complete patterns
+	if strings.Contains(line, "turn.complete") || strings.Contains(line, "response.complete") ||
+		strings.Contains(line, "assistant.done") {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchComplete,
+			Reason: "turn complete",
+			Line:   line,
+		}
+	}
+
+	// General assistant activity
+	if strings.Contains(line, "assistant") || strings.Contains(line, "response") ||
+		strings.Contains(line, "message") {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchActivity,
+			Reason: "assistant activity",
+			Line:   line,
+		}
+	}
+
+	return nil
+}
+
+// CrushMatcher detects Charmbracelet Crush activity from log files.
+// Crush uses slog for structured logging.
+type CrushMatcher struct {
+	agent string
+}
+
+// NewCrushMatcher creates a new Crush-specific matcher.
+func NewCrushMatcher() *CrushMatcher {
+	return &CrushMatcher{agent: "crush"}
+}
+
+// Match implements Matcher for CrushMatcher.
+func (m *CrushMatcher) Match(line string) *Match {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) == 0 {
+		return nil
+	}
+
+	// Try JSON parsing first (slog can output JSON)
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &obj); err == nil {
+		// Check for message or msg field
+		if msg, ok := obj["msg"].(string); ok {
+			if strings.Contains(msg, "tool") && strings.Contains(msg, "confirm") {
+				return &Match{
+					Agent:  m.agent,
+					Type:   MatchHolding,
+					Reason: "tool confirmation",
+					Line:   line,
+					Meta:   obj,
+				}
+			}
+			if strings.Contains(msg, "complete") || strings.Contains(msg, "done") {
+				return &Match{
+					Agent:  m.agent,
+					Type:   MatchComplete,
+					Reason: "turn complete",
+					Line:   line,
+					Meta:   obj,
+				}
+			}
+			// Any other message = activity
+			return &Match{
+				Agent:  m.agent,
+				Type:   MatchActivity,
+				Reason: "activity",
+				Line:   line,
+				Meta:   obj,
+			}
+		}
+	}
+
+	// Fallback to text pattern matching
+	if strings.Contains(line, "tool") && (strings.Contains(line, "confirm") || strings.Contains(line, "permission")) {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchHolding,
+			Reason: "tool confirmation",
+			Line:   line,
+		}
+	}
+
+	if strings.Contains(line, "complete") || strings.Contains(line, "finished") {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchComplete,
+			Reason: "turn complete",
+			Line:   line,
+		}
+	}
+
+	if strings.Contains(line, "assistant") || strings.Contains(line, "response") {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchActivity,
+			Reason: "assistant activity",
+			Line:   line,
+		}
+	}
+
+	return nil
+}
+
+// AmazonQMatcher detects Amazon Q CLI activity from log files.
+// Amazon Q logs to chat.log and qchat.log files.
+type AmazonQMatcher struct {
+	agent string
+}
+
+// NewAmazonQMatcher creates a new Amazon Q-specific matcher.
+func NewAmazonQMatcher() *AmazonQMatcher {
+	return &AmazonQMatcher{agent: "amazonq"}
+}
+
+// Match implements Matcher for AmazonQMatcher.
+func (m *AmazonQMatcher) Match(line string) *Match {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) == 0 {
+		return nil
+	}
+
+	// Try JSON parsing first
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &obj); err == nil {
+		// Check for event type
+		if eventType, ok := obj["type"].(string); ok {
+			switch eventType {
+			case "tool_use", "tool_call":
+				meta := obj
+				if name, ok := obj["name"].(string); ok {
+					if meta == nil {
+						meta = make(map[string]interface{})
+					}
+					meta["tool"] = name
+				}
+				return &Match{
+					Agent:  m.agent,
+					Type:   MatchHolding,
+					Reason: "tool use",
+					Line:   line,
+					Meta:   meta,
+				}
+			case "response_complete", "turn_complete":
+				return &Match{
+					Agent:  m.agent,
+					Type:   MatchComplete,
+					Reason: "response complete",
+					Line:   line,
+					Meta:   obj,
+				}
+			}
+		}
+		// Any other JSON = activity
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchActivity,
+			Reason: "activity",
+			Line:   line,
+			Meta:   obj,
+		}
+	}
+
+	// Fallback to text pattern matching
+	if strings.Contains(line, "tool") && (strings.Contains(line, "permission") || strings.Contains(line, "confirm")) {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchHolding,
+			Reason: "tool permission",
+			Line:   line,
+		}
+	}
+
+	if strings.Contains(line, "complete") || strings.Contains(line, "finished") || strings.Contains(line, "done") {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchComplete,
+			Reason: "complete",
+			Line:   line,
+		}
+	}
+
+	if strings.Contains(line, "response") || strings.Contains(line, "message") || strings.Contains(line, "chat") {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchActivity,
+			Reason: "activity",
+			Line:   line,
+		}
+	}
+
+	return nil
+}
+
 // ComboMatcher combines multiple matchers, returning the first match.
 type ComboMatcher struct {
 	matchers []Matcher
@@ -506,8 +833,20 @@ func CreateMatcher(agentName string) Matcher {
 		// Gemini uses pretty-printed JSON with type: "gemini" for awaiting detection
 		return NewGeminiMatcher()
 	case "copilot":
-		// Copilot only logs HTTP requests - no awaiting detection possible
+		// Copilot uses session-state JSONL with assistant.turn_end and toolRequests
 		return NewCopilotMatcher()
+	case "qwen":
+		// Qwen Code logs OpenAI-compatible API calls in JSONL format
+		return NewQwenMatcher()
+	case "opencode":
+		// SST OpenCode uses timestamped log files
+		return NewOpenCodeMatcher()
+	case "crush":
+		// Charmbracelet Crush uses slog for structured logging
+		return NewCrushMatcher()
+	case "amazonq":
+		// Amazon Q CLI logs to chat.log and qchat.log
+		return NewAmazonQMatcher()
 	default:
 		// Other agents use regex matching
 		return MustRegexMatcher(agentName, DefaultPattern)
