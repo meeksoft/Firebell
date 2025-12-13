@@ -104,15 +104,28 @@ func (s *State) GetAllAgents() []*AgentState {
 }
 
 // RecordCue records that activity was detected for an agent.
+// Strong cues (MatchComplete, MatchHolding) are not overwritten by MatchActivity.
 func (s *State) RecordCue(agentName string, cueType detect.MatchType) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if agent, ok := s.agents[agentName]; ok {
 		agent.LastCue = time.Now()
-		agent.LastCueType = cueType
 		agent.QuietNotified = false // Reset quiet notification
 		agent.lastNotify = time.Now()
+
+		// MatchActivity is a weak signal - don't overwrite strong cues
+		// Strong cues: MatchComplete (turn finished), MatchHolding (tool permission)
+		if cueType == detect.MatchActivity {
+			// Only record Activity if current cue is also Activity or unset
+			if agent.LastCueType == detect.MatchActivity || agent.LastCueType == detect.MatchAwaiting {
+				agent.LastCueType = cueType
+			}
+			// Otherwise keep the existing strong cue type
+		} else {
+			// Strong cue - always record
+			agent.LastCueType = cueType
+		}
 	}
 }
 
