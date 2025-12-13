@@ -77,6 +77,20 @@ var Registry = map[string]Agent{
 		LogPatterns:  []string{"*.log"},
 		ProcessNames: []string{"q", "amazonq"},
 	},
+	"plandex": {
+		Name:         "plandex",
+		DisplayName:  "Plandex",
+		LogPath:      "~/.plandex-home",
+		LogPatterns:  []string{"*.log", "*.json"},
+		ProcessNames: []string{"plandex"},
+	},
+	"aider": {
+		Name:         "aider",
+		DisplayName:  "Aider",
+		LogPath:      "~/.aider",
+		LogPatterns:  []string{"*.history", "*.md", "*.log"},
+		ProcessNames: []string{"aider"},
+	},
 }
 
 // GetAgent returns the agent definition for the given name.

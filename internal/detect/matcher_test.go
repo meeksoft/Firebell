@@ -770,8 +770,318 @@ func TestAmazonQMatcher(t *testing.T) {
 	}
 }
 
+func TestPlandexMatcher(t *testing.T) {
+	m := NewPlandexMatcher()
+
+	tests := []struct {
+		name      string
+		line      string
+		wantMatch bool
+		wantType  MatchType
+	}{
+		{
+			name:      "json status running - activity",
+			line:      `{"status":"running","task":"planning"}`,
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+		{
+			name:      "json status complete - complete",
+			line:      `{"status":"complete","changes":5}`,
+			wantMatch: true,
+			wantType:  MatchComplete,
+		},
+		{
+			name:      "json status waiting - holding",
+			line:      `{"status":"waiting","reason":"review"}`,
+			wantMatch: true,
+			wantType:  MatchHolding,
+		},
+		{
+			name:      "text plan complete - complete",
+			line:      `Plan complete! Applied 5 changes.`,
+			wantMatch: true,
+			wantType:  MatchComplete,
+		},
+		{
+			name:      "text confirm - holding",
+			line:      `Please confirm the changes before applying`,
+			wantMatch: true,
+			wantType:  MatchHolding,
+		},
+		{
+			name:      "text building - activity",
+			line:      `Building plan for task...`,
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+		{
+			name:      "unrelated log - no match",
+			line:      `Started server on port 8080`,
+			wantMatch: false,
+		},
+		{
+			name:      "empty line - no match",
+			line:      "",
+			wantMatch: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := m.Match(tt.line)
+
+			if (result != nil) != tt.wantMatch {
+				t.Errorf("Match() returned %v, want match=%v", result != nil, tt.wantMatch)
+				return
+			}
+
+			if result == nil {
+				return
+			}
+
+			if result.Agent != "plandex" {
+				t.Errorf("Agent = %q, want 'plandex'", result.Agent)
+			}
+
+			if result.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v", result.Type, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestAiderMatcher(t *testing.T) {
+	m := NewAiderMatcher()
+
+	tests := []struct {
+		name      string
+		line      string
+		wantMatch bool
+		wantType  MatchType
+	}{
+		{
+			name:      "section marker - activity",
+			line:      "#### Changes to file.go",
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+		{
+			name:      "applied edit - complete",
+			line:      "Applied edit to src/main.go",
+			wantMatch: true,
+			wantType:  MatchComplete,
+		},
+		{
+			name:      "y/n prompt - holding",
+			line:      "Apply these changes? (y/n)",
+			wantMatch: true,
+			wantType:  MatchHolding,
+		},
+		{
+			name:      "thinking - activity",
+			line:      "Thinking about the best approach...",
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+		{
+			name:      "json assistant role - complete",
+			line:      `{"role":"assistant","content":"Here is the solution"}`,
+			wantMatch: true,
+			wantType:  MatchComplete,
+		},
+		{
+			name:      "json with tool calls - holding",
+			line:      `{"role":"assistant","tool_calls":[{"name":"edit"}]}`,
+			wantMatch: true,
+			wantType:  MatchHolding,
+		},
+		{
+			name:      "long content line - activity",
+			line:      "This is a substantial line of content that should be detected as activity",
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+		{
+			name:      "short line - no match",
+			line:      "ok",
+			wantMatch: false,
+		},
+		{
+			name:      "empty line - no match",
+			line:      "",
+			wantMatch: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := m.Match(tt.line)
+
+			if (result != nil) != tt.wantMatch {
+				t.Errorf("Match() returned %v, want match=%v", result != nil, tt.wantMatch)
+				return
+			}
+
+			if result == nil {
+				return
+			}
+
+			if result.Agent != "aider" {
+				t.Errorf("Agent = %q, want 'aider'", result.Agent)
+			}
+
+			if result.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v", result.Type, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestFallbackMatcher(t *testing.T) {
+	m := NewFallbackMatcher("unknown")
+
+	tests := []struct {
+		name      string
+		line      string
+		wantMatch bool
+		wantType  MatchType
+	}{
+		// JSON tests
+		{
+			name:      "json tool_calls - holding",
+			line:      `{"role":"assistant","tool_calls":[{"name":"bash"}]}`,
+			wantMatch: true,
+			wantType:  MatchHolding,
+		},
+		{
+			name:      "json stop_reason end_turn - complete",
+			line:      `{"type":"assistant","stop_reason":"end_turn"}`,
+			wantMatch: true,
+			wantType:  MatchComplete,
+		},
+		{
+			name:      "json stop_reason tool_use - holding",
+			line:      `{"type":"assistant","stop_reason":"tool_use"}`,
+			wantMatch: true,
+			wantType:  MatchHolding,
+		},
+		{
+			name:      "json finish_reason stop - complete",
+			line:      `{"choices":[{"finish_reason":"stop"}]}`,
+			wantMatch: true,
+			wantType:  MatchComplete,
+		},
+		{
+			name:      "json status complete - complete",
+			line:      `{"status":"complete","result":"ok"}`,
+			wantMatch: true,
+			wantType:  MatchComplete,
+		},
+		{
+			name:      "json status waiting - holding",
+			line:      `{"status":"waiting","reason":"approval"}`,
+			wantMatch: true,
+			wantType:  MatchHolding,
+		},
+		{
+			name:      "json type assistant - activity",
+			line:      `{"type":"assistant","content":"hello"}`,
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+		{
+			name:      "json role assistant - activity",
+			line:      `{"role":"assistant","content":"hello"}`,
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+		{
+			name:      "json with message - activity",
+			line:      `{"id":"123","message":"processing"}`,
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+		// Text tests
+		{
+			name:      "text confirm - holding",
+			line:      "Please confirm the action",
+			wantMatch: true,
+			wantType:  MatchHolding,
+		},
+		{
+			name:      "text y/n - holding",
+			line:      "Continue? (y/n)",
+			wantMatch: true,
+			wantType:  MatchHolding,
+		},
+		{
+			name:      "text complete - complete",
+			line:      "Task complete!",
+			wantMatch: true,
+			wantType:  MatchComplete,
+		},
+		{
+			name:      "text finished - complete",
+			line:      "Build finished successfully",
+			wantMatch: true,
+			wantType:  MatchComplete,
+		},
+		{
+			name:      "text thinking - activity",
+			line:      "Thinking about the solution...",
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+		{
+			name:      "text processing - activity",
+			line:      "Processing request...",
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+		{
+			name:      "unrelated json - no match",
+			line:      `{"level":"debug","time":"2025-01-01"}`,
+			wantMatch: false,
+		},
+		{
+			name:      "unrelated text - no match",
+			line:      "Server started on port 8080",
+			wantMatch: false,
+		},
+		{
+			name:      "empty line - no match",
+			line:      "",
+			wantMatch: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := m.Match(tt.line)
+
+			if (result != nil) != tt.wantMatch {
+				t.Errorf("Match() returned %v, want match=%v", result != nil, tt.wantMatch)
+				return
+			}
+
+			if result == nil {
+				return
+			}
+
+			if result.Agent != "unknown" {
+				t.Errorf("Agent = %q, want 'unknown'", result.Agent)
+			}
+
+			if result.Type != tt.wantType {
+				t.Errorf("Type = %v, want %v", result.Type, tt.wantType)
+			}
+		})
+	}
+}
+
 func TestCreateMatcher(t *testing.T) {
-	tests := []string{"claude", "codex", "copilot", "gemini", "opencode", "crush", "qwen", "amazonq"}
+	tests := []string{"claude", "codex", "copilot", "gemini", "opencode", "crush", "qwen", "amazonq", "plandex", "aider"}
 
 	for _, agent := range tests {
 		t.Run(agent, func(t *testing.T) {
@@ -781,4 +1091,16 @@ func TestCreateMatcher(t *testing.T) {
 			}
 		})
 	}
+
+	// Test fallback for unknown agent
+	t.Run("unknown_agent", func(t *testing.T) {
+		m := CreateMatcher("some_new_agent")
+		if m == nil {
+			t.Error("CreateMatcher for unknown agent returned nil")
+		}
+		// Should be FallbackMatcher
+		if _, ok := m.(*FallbackMatcher); !ok {
+			t.Error("CreateMatcher for unknown agent should return FallbackMatcher")
+		}
+	})
 }

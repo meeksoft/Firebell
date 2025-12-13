@@ -2,7 +2,7 @@
 
 **Real-time activity monitoring for AI CLI tools**
 
-Firebell watches log files from AI coding assistants (Claude Code, Codex, GitHub Copilot, Gemini CLI, OpenCode, Crush, Qwen Code, Amazon Q) and sends notifications when activity is detected. Know when your AI assistant is working, idle, or finished—without checking the terminal.
+Firebell watches log files from AI coding assistants (Claude Code, Codex, GitHub Copilot, Gemini CLI, OpenCode, Crush, Qwen Code, Amazon Q, Plandex, Aider) and sends notifications when activity is detected. Know when your AI assistant is working, idle, or finished—without checking the terminal.
 
 ## Quick Install
 
@@ -14,7 +14,7 @@ Requires: Go 1.21+ and Git
 
 ## Features
 
-- **Multi-CLI Support** - Monitors Claude Code, Codex, Copilot, Gemini, OpenCode, Crush, Qwen Code, Amazon Q
+- **Multi-CLI Support** - Monitors Claude Code, Codex, Copilot, Gemini, OpenCode, Crush, Qwen Code, Amazon Q, Plandex, Aider
 - **Event-Driven** - Uses fsnotify for instant notifications (<50ms latency)
 - **Daemon Mode** - Run as background service with singleton enforcement and log management
 - **Command Wrapping** - Wrap any command and monitor its output in real-time
@@ -212,6 +212,10 @@ See [docs/HOOKS.md](docs/HOOKS.md) for complete integration documentation.
 | Crush | `~/.local/share/crush` | slog/JSON parsing |
 | Qwen Code | `~/.qwen/logs/openai` | OpenAI API JSONL parsing |
 | Amazon Q | `~/.local/state/amazonq/logs` | Pattern matching |
+| Plandex | `~/.plandex-home` | JSON/text pattern matching |
+| Aider | `~/.aider` | Markdown/JSON parsing |
+
+**Note:** Aider logs are project-local by default. For best results with Aider, use `firebell wrap -- aider` or configure global history via `AIDER_CHAT_HISTORY_FILE`.
 
 ## Configuration
 
@@ -274,7 +278,9 @@ Format-aware detection for each agent:
 - **OpenCode**: Pattern matches `turn.complete` (completion) and `tool.confirm` (holding)
 - **Crush**: Parses slog JSON, detects completion and tool confirmation patterns
 - **Amazon Q**: Pattern matches response/chat events and tool permissions
-- **Others**: Regex matching for `agent_message|assistant_message`
+- **Plandex**: JSON status and text patterns (plan complete, review changes)
+- **Aider**: Markdown history and JSON LLM logs (applied edit, y/n prompts)
+- **Others**: Intelligent fallback matching for JSON (`stop_reason`, `finish_reason`, `tool_calls`) and text patterns
 
 ### Notification Types
 

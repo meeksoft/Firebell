@@ -89,6 +89,9 @@ const (
 // - OpenCodeMatcher: Pattern matching for sst/opencode logs
 // - CrushMatcher: slog/JSON parsing for Charmbracelet Crush
 // - AmazonQMatcher: Pattern matching for Amazon Q CLI logs
+// - PlandexMatcher: JSON status and text patterns for Plandex
+// - AiderMatcher: Markdown history and JSON LLM logs for Aider
+// - FallbackMatcher: Intelligent JSON/text matching for unknown agents
 // - RegexMatcher: General pattern matching
 // - ComboMatcher: Try multiple matchers in sequence
 ```

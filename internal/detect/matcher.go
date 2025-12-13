@@ -795,6 +795,219 @@ func (m *AmazonQMatcher) Match(line string) *Match {
 	return nil
 }
 
+// PlandexMatcher detects Plandex activity from log files.
+// Plandex is a Go-based AI coding agent with server-client architecture.
+type PlandexMatcher struct {
+	agent string
+}
+
+// NewPlandexMatcher creates a new Plandex-specific matcher.
+func NewPlandexMatcher() *PlandexMatcher {
+	return &PlandexMatcher{agent: "plandex"}
+}
+
+// Match implements Matcher for PlandexMatcher.
+func (m *PlandexMatcher) Match(line string) *Match {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) == 0 {
+		return nil
+	}
+
+	// Try JSON parsing first
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &obj); err == nil {
+		// Check for status or type fields
+		if status, ok := obj["status"].(string); ok {
+			switch status {
+			case "building", "running", "streaming":
+				return &Match{
+					Agent:  m.agent,
+					Type:   MatchActivity,
+					Reason: "status: " + status,
+					Line:   line,
+					Meta:   obj,
+				}
+			case "complete", "finished", "done":
+				return &Match{
+					Agent:  m.agent,
+					Type:   MatchComplete,
+					Reason: "status: " + status,
+					Line:   line,
+					Meta:   obj,
+				}
+			case "pending", "waiting", "blocked":
+				return &Match{
+					Agent:  m.agent,
+					Type:   MatchHolding,
+					Reason: "status: " + status,
+					Line:   line,
+					Meta:   obj,
+				}
+			}
+		}
+		// Any other JSON = activity
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchActivity,
+			Reason: "json activity",
+			Line:   line,
+			Meta:   obj,
+		}
+	}
+
+	// Text pattern matching
+	lineLower := strings.ToLower(line)
+
+	// Completion patterns
+	if strings.Contains(lineLower, "plan complete") || strings.Contains(lineLower, "changes applied") ||
+		strings.Contains(lineLower, "finished") || strings.Contains(lineLower, "done building") {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchComplete,
+			Reason: "completion pattern",
+			Line:   line,
+		}
+	}
+
+	// Waiting/blocked patterns
+	if strings.Contains(lineLower, "waiting for") || strings.Contains(lineLower, "confirm") ||
+		strings.Contains(lineLower, "review changes") || strings.Contains(lineLower, "pending approval") {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchHolding,
+			Reason: "waiting pattern",
+			Line:   line,
+		}
+	}
+
+	// Activity patterns
+	if strings.Contains(lineLower, "building") || strings.Contains(lineLower, "planning") ||
+		strings.Contains(lineLower, "streaming") || strings.Contains(lineLower, "processing") ||
+		strings.Contains(lineLower, "loading") || strings.Contains(lineLower, "running") {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchActivity,
+			Reason: "activity pattern",
+			Line:   line,
+		}
+	}
+
+	return nil
+}
+
+// AiderMatcher detects Aider activity from history and log files.
+// Aider is a Python-based AI pair programming assistant.
+type AiderMatcher struct {
+	agent string
+}
+
+// NewAiderMatcher creates a new Aider-specific matcher.
+func NewAiderMatcher() *AiderMatcher {
+	return &AiderMatcher{agent: "aider"}
+}
+
+// Match implements Matcher for AiderMatcher.
+func (m *AiderMatcher) Match(line string) *Match {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) == 0 {
+		return nil
+	}
+
+	// Aider chat history is markdown format
+	// LLM history contains request/response data
+
+	// Check for assistant/model response markers
+	if strings.HasPrefix(line, "####") || strings.HasPrefix(line, "---") {
+		// Section separator in chat history
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchActivity,
+			Reason: "section marker",
+			Line:   line,
+		}
+	}
+
+	// Check for completion patterns
+	lineLower := strings.ToLower(line)
+	if strings.Contains(lineLower, "applied edit") || strings.Contains(lineLower, "wrote") ||
+		strings.Contains(lineLower, "created") || strings.Contains(lineLower, "updated") {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchComplete,
+			Reason: "edit applied",
+			Line:   line,
+		}
+	}
+
+	// Check for prompt/waiting patterns
+	if strings.Contains(lineLower, "y/n") || strings.Contains(lineLower, "confirm") ||
+		strings.Contains(lineLower, "proceed?") || strings.Contains(lineLower, "allow?") {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchHolding,
+			Reason: "confirmation prompt",
+			Line:   line,
+		}
+	}
+
+	// Check for thinking/working patterns
+	if strings.Contains(lineLower, "thinking") || strings.Contains(lineLower, "searching") ||
+		strings.Contains(lineLower, "analyzing") || strings.Contains(lineLower, "generating") {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchActivity,
+			Reason: "working",
+			Line:   line,
+		}
+	}
+
+	// Try JSON parsing for LLM history
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &obj); err == nil {
+		// Check for role field (OpenAI format)
+		if role, ok := obj["role"].(string); ok {
+			if role == "assistant" {
+				// Check for tool calls
+				if _, hasTools := obj["tool_calls"]; hasTools {
+					return &Match{
+						Agent:  m.agent,
+						Type:   MatchHolding,
+						Reason: "tool call",
+						Line:   line,
+						Meta:   obj,
+					}
+				}
+				return &Match{
+					Agent:  m.agent,
+					Type:   MatchComplete,
+					Reason: "assistant response",
+					Line:   line,
+					Meta:   obj,
+				}
+			}
+		}
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchActivity,
+			Reason: "json activity",
+			Line:   line,
+			Meta:   obj,
+		}
+	}
+
+	// Generic content detection - any substantial line is activity
+	if len(trimmed) > 20 {
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchActivity,
+			Reason: "content",
+			Line:   line,
+		}
+	}
+
+	return nil
+}
+
 // ComboMatcher combines multiple matchers, returning the first match.
 type ComboMatcher struct {
 	matchers []Matcher
@@ -819,6 +1032,177 @@ func (m *ComboMatcher) Match(line string) *Match {
 // Matches Claude ("type":"assistant"), Gemini ("type": "gemini"), and other common patterns.
 // Allows optional whitespace after colon for pretty-printed JSON.
 const DefaultPattern = `"type":\s*"assistant"|"type":\s*"gemini"|assistant_message|agent_message|responses/compact`
+
+// FallbackMatcher provides intelligent pattern matching for unknown AI agents.
+// It combines JSON parsing with common text patterns to detect activity,
+// completion, and tool permission states across various AI CLI tools.
+type FallbackMatcher struct {
+	agent string
+}
+
+// NewFallbackMatcher creates a new fallback matcher for unknown agents.
+func NewFallbackMatcher(agentName string) *FallbackMatcher {
+	return &FallbackMatcher{agent: agentName}
+}
+
+// Match implements Matcher for FallbackMatcher.
+func (m *FallbackMatcher) Match(line string) *Match {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) == 0 {
+		return nil
+	}
+
+	// Try JSON parsing first - most AI tools use structured logging
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &obj); err == nil {
+		return m.matchJSON(line, obj)
+	}
+
+	// Fall back to text pattern matching
+	return m.matchText(line, trimmed)
+}
+
+// matchJSON handles JSON-formatted log lines
+func (m *FallbackMatcher) matchJSON(line string, obj map[string]interface{}) *Match {
+	// Check for common type/role fields
+	typ, _ := obj["type"].(string)
+	role, _ := obj["role"].(string)
+	status, _ := obj["status"].(string)
+	event, _ := obj["event"].(string)
+
+	// Normalize to lowercase for comparison
+	typLower := strings.ToLower(typ)
+	roleLower := strings.ToLower(role)
+	statusLower := strings.ToLower(status)
+	eventLower := strings.ToLower(event)
+
+	// Check for tool/function calls (Holding)
+	if _, hasToolCalls := obj["tool_calls"]; hasToolCalls {
+		return &Match{Agent: m.agent, Type: MatchHolding, Reason: "tool_calls", Line: line, Meta: obj}
+	}
+	if _, hasFunctionCall := obj["function_call"]; hasFunctionCall {
+		return &Match{Agent: m.agent, Type: MatchHolding, Reason: "function_call", Line: line, Meta: obj}
+	}
+	if typLower == "tool_use" || typLower == "tool_call" || typLower == "function_call" {
+		return &Match{Agent: m.agent, Type: MatchHolding, Reason: "tool type", Line: line, Meta: obj}
+	}
+
+	// Check for completion indicators
+	if stopReason, ok := obj["stop_reason"].(string); ok {
+		switch stopReason {
+		case "end_turn", "stop":
+			return &Match{Agent: m.agent, Type: MatchComplete, Reason: "stop_reason: " + stopReason, Line: line, Meta: obj}
+		case "tool_use":
+			return &Match{Agent: m.agent, Type: MatchHolding, Reason: "stop_reason: tool_use", Line: line, Meta: obj}
+		}
+	}
+	if finishReason, ok := obj["finish_reason"].(string); ok {
+		switch finishReason {
+		case "stop", "end":
+			return &Match{Agent: m.agent, Type: MatchComplete, Reason: "finish_reason: " + finishReason, Line: line, Meta: obj}
+		case "tool_calls", "function_call":
+			return &Match{Agent: m.agent, Type: MatchHolding, Reason: "finish_reason: " + finishReason, Line: line, Meta: obj}
+		}
+	}
+
+	// Check for OpenAI-style nested choices array
+	if choices, ok := obj["choices"].([]interface{}); ok && len(choices) > 0 {
+		if choice, ok := choices[0].(map[string]interface{}); ok {
+			if finishReason, ok := choice["finish_reason"].(string); ok {
+				switch finishReason {
+				case "stop", "end":
+					return &Match{Agent: m.agent, Type: MatchComplete, Reason: "finish_reason: " + finishReason, Line: line, Meta: obj}
+				case "tool_calls", "function_call":
+					return &Match{Agent: m.agent, Type: MatchHolding, Reason: "finish_reason: " + finishReason, Line: line, Meta: obj}
+				}
+			}
+		}
+	}
+
+	// Check status field
+	switch statusLower {
+	case "complete", "completed", "done", "finished", "success":
+		return &Match{Agent: m.agent, Type: MatchComplete, Reason: "status: " + status, Line: line, Meta: obj}
+	case "pending", "waiting", "blocked", "paused":
+		return &Match{Agent: m.agent, Type: MatchHolding, Reason: "status: " + status, Line: line, Meta: obj}
+	case "running", "processing", "streaming", "generating":
+		return &Match{Agent: m.agent, Type: MatchActivity, Reason: "status: " + status, Line: line, Meta: obj}
+	}
+
+	// Check event field
+	switch eventLower {
+	case "complete", "turn_complete", "response_complete", "turn_end":
+		return &Match{Agent: m.agent, Type: MatchComplete, Reason: "event: " + event, Line: line, Meta: obj}
+	case "tool_request", "permission_required", "confirmation_needed":
+		return &Match{Agent: m.agent, Type: MatchHolding, Reason: "event: " + event, Line: line, Meta: obj}
+	}
+
+	// Check type field for assistant messages
+	if typLower == "assistant" || typLower == "gemini" || typLower == "ai" || typLower == "model" {
+		return &Match{Agent: m.agent, Type: MatchActivity, Reason: "type: " + typ, Line: line, Meta: obj}
+	}
+
+	// Check role field
+	if roleLower == "assistant" || roleLower == "ai" || roleLower == "model" {
+		return &Match{Agent: m.agent, Type: MatchActivity, Reason: "role: " + role, Line: line, Meta: obj}
+	}
+
+	// Check for message/content fields (generic activity)
+	if _, hasMessage := obj["message"]; hasMessage {
+		return &Match{Agent: m.agent, Type: MatchActivity, Reason: "has message", Line: line, Meta: obj}
+	}
+	if _, hasContent := obj["content"]; hasContent {
+		return &Match{Agent: m.agent, Type: MatchActivity, Reason: "has content", Line: line, Meta: obj}
+	}
+	if _, hasResponse := obj["response"]; hasResponse {
+		return &Match{Agent: m.agent, Type: MatchActivity, Reason: "has response", Line: line, Meta: obj}
+	}
+
+	return nil
+}
+
+// matchText handles plain text log lines
+func (m *FallbackMatcher) matchText(line, trimmed string) *Match {
+	lineLower := strings.ToLower(trimmed)
+
+	// Holding patterns - waiting for user input/permission
+	holdingPatterns := []string{
+		"waiting for", "confirm", "permission", "approve", "allow",
+		"y/n", "yes/no", "proceed?", "continue?", "accept?",
+		"review changes", "pending approval", "requires confirmation",
+	}
+	for _, pattern := range holdingPatterns {
+		if strings.Contains(lineLower, pattern) {
+			return &Match{Agent: m.agent, Type: MatchHolding, Reason: "text: " + pattern, Line: line}
+		}
+	}
+
+	// Completion patterns
+	completePatterns := []string{
+		"complete", "completed", "finished", "done", "success",
+		"applied edit", "changes applied", "wrote file", "created file",
+		"task complete", "turn complete", "response complete",
+	}
+	for _, pattern := range completePatterns {
+		if strings.Contains(lineLower, pattern) {
+			return &Match{Agent: m.agent, Type: MatchComplete, Reason: "text: " + pattern, Line: line}
+		}
+	}
+
+	// Activity patterns
+	activityPatterns := []string{
+		"thinking", "generating", "processing", "analyzing", "searching",
+		"loading", "streaming", "running", "executing", "building",
+		"assistant", "response", "message", "output",
+	}
+	for _, pattern := range activityPatterns {
+		if strings.Contains(lineLower, pattern) {
+			return &Match{Agent: m.agent, Type: MatchActivity, Reason: "text: " + pattern, Line: line}
+		}
+	}
+
+	return nil
+}
 
 // CreateMatcher creates the appropriate matcher for an agent.
 func CreateMatcher(agentName string) Matcher {
@@ -847,8 +1231,14 @@ func CreateMatcher(agentName string) Matcher {
 	case "amazonq":
 		// Amazon Q CLI logs to chat.log and qchat.log
 		return NewAmazonQMatcher()
+	case "plandex":
+		// Plandex uses JSON status and text patterns
+		return NewPlandexMatcher()
+	case "aider":
+		// Aider uses markdown history and JSON LLM logs
+		return NewAiderMatcher()
 	default:
-		// Other agents use regex matching
-		return MustRegexMatcher(agentName, DefaultPattern)
+		// Unknown agents use intelligent fallback matching
+		return NewFallbackMatcher(agentName)
 	}
 }
