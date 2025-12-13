@@ -227,27 +227,64 @@ func TestCopilotMatcher(t *testing.T) {
 		line      string
 		wantMatch bool
 		wantType  MatchType
+		wantTool  string
 	}{
 		{
-			name:      "completion success",
+			name:      "turn end - complete",
+			line:      `{"type":"assistant.turn_end","data":{"turnId":"0"},"id":"abc123"}`,
+			wantMatch: true,
+			wantType:  MatchComplete,
+		},
+		{
+			name:      "assistant message with tool requests - holding",
+			line:      `{"type":"assistant.message","data":{"toolRequests":[{"name":"bash","arguments":{}}]}}`,
+			wantMatch: true,
+			wantType:  MatchHolding,
+			wantTool:  "bash",
+		},
+		{
+			name:      "assistant message without tool requests - activity",
+			line:      `{"type":"assistant.message","data":{"content":"Hello"}}`,
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+		{
+			name:      "tool execution start - activity",
+			line:      `{"type":"tool.execution_start","data":{"toolName":"view"}}`,
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+		{
+			name:      "user message - activity",
+			line:      `{"type":"user.message","data":{"content":"hello"}}`,
+			wantMatch: true,
+			wantType:  MatchActivity,
+		},
+		{
+			name:      "legacy completion success",
 			line:      "chat/completions succeeded",
 			wantMatch: true,
 			wantType:  MatchComplete,
 		},
 		{
-			name:      "completion success with details",
+			name:      "legacy completion with details",
 			line:      "[info] chat/completions succeeded in 200ms",
 			wantMatch: true,
 			wantType:  MatchComplete,
 		},
 		{
-			name:      "completion failed - no match",
-			line:      "chat/completions failed",
+			name:      "session info - no match",
+			line:      `{"type":"session.info","data":{}}`,
 			wantMatch: false,
 		},
 		{
 			name:      "random log - no match",
 			line:      "random log",
+			wantMatch: false,
+		},
+		{
+			name:      "empty line - no match",
+			line:      "",
 			wantMatch: false,
 		},
 	}
@@ -261,8 +298,19 @@ func TestCopilotMatcher(t *testing.T) {
 				return
 			}
 
-			if result != nil && result.Type != tt.wantType {
+			if result == nil {
+				return
+			}
+
+			if result.Type != tt.wantType {
 				t.Errorf("Type = %v, want %v", result.Type, tt.wantType)
+			}
+
+			if tt.wantTool != "" {
+				tool, ok := result.Meta["tool"].(string)
+				if !ok || tool != tt.wantTool {
+					t.Errorf("Meta[tool] = %q, want %q", tool, tt.wantTool)
+				}
 			}
 		})
 	}

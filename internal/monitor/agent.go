@@ -38,8 +38,8 @@ var Registry = map[string]Agent{
 	"copilot": {
 		Name:         "copilot",
 		DisplayName:  "GitHub Copilot",
-		LogPath:      "~/.copilot/logs",
-		LogPatterns:  []string{"*.log"},
+		LogPath:      "~/.copilot/session-state",
+		LogPatterns:  []string{"*.jsonl"},
 		ProcessNames: []string{"copilot"},
 	},
 	"gemini": {

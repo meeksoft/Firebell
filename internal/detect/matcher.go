@@ -360,8 +360,9 @@ func extractToolName(line string) string {
 	return rest[:endIdx]
 }
 
-// CopilotMatcher detects GitHub Copilot completion events.
-// Note: Copilot only logs HTTP requests, so awaiting detection is not possible.
+// CopilotMatcher detects GitHub Copilot activity from session-state JSONL files.
+// Parses structured JSONL with type:"assistant.turn_end" for completion
+// and type:"tool.execution_start" for activity.
 type CopilotMatcher struct {
 	agent string
 }
@@ -373,17 +374,97 @@ func NewCopilotMatcher() *CopilotMatcher {
 
 // Match implements Matcher for CopilotMatcher.
 func (m *CopilotMatcher) Match(line string) *Match {
-	// Copilot logs completion success - this IS the completion signal
-	// After quiet period, this will trigger "Cooling"
-	// If activity stops without this cue, "Awaiting" will be inferred
-	if strings.Contains(line, "chat/completions succeeded") {
+	// Skip empty lines
+	if len(strings.TrimSpace(line)) == 0 {
+		return nil
+	}
+
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &obj); err != nil {
+		// Fallback: check for old log format
+		if strings.Contains(line, "chat/completions succeeded") {
+			return &Match{
+				Agent:  m.agent,
+				Type:   MatchComplete,
+				Reason: "completion success",
+				Line:   line,
+			}
+		}
+		return nil
+	}
+
+	typ, ok := obj["type"].(string)
+	if !ok {
+		return nil
+	}
+
+	switch typ {
+	case "assistant.turn_end":
+		// Turn completed - agent finished responding
 		return &Match{
 			Agent:  m.agent,
 			Type:   MatchComplete,
-			Reason: "completion success",
+			Reason: "turn end",
 			Line:   line,
+			Meta:   obj,
+		}
+
+	case "assistant.message":
+		// Check for tool requests in the message
+		if data, ok := obj["data"].(map[string]interface{}); ok {
+			if toolRequests, ok := data["toolRequests"].([]interface{}); ok && len(toolRequests) > 0 {
+				// Has tool requests - this is a potential holding point
+				meta := obj
+				// Extract first tool name
+				if len(toolRequests) > 0 {
+					if req, ok := toolRequests[0].(map[string]interface{}); ok {
+						if name, ok := req["name"].(string); ok {
+							if meta == nil {
+								meta = make(map[string]interface{})
+							}
+							meta["tool"] = name
+						}
+					}
+				}
+				return &Match{
+					Agent:  m.agent,
+					Type:   MatchHolding,
+					Reason: "tool request",
+					Line:   line,
+					Meta:   meta,
+				}
+			}
+		}
+		// Regular assistant message without tool requests
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchActivity,
+			Reason: "assistant message",
+			Line:   line,
+			Meta:   obj,
+		}
+
+	case "tool.execution_start":
+		// Tool is executing - activity
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchActivity,
+			Reason: "tool execution",
+			Line:   line,
+			Meta:   obj,
+		}
+
+	case "user.message":
+		// User input - activity
+		return &Match{
+			Agent:  m.agent,
+			Type:   MatchActivity,
+			Reason: "user message",
+			Line:   line,
+			Meta:   obj,
 		}
 	}
+
 	return nil
 }
 
