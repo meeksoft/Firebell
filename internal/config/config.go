@@ -62,6 +62,7 @@ type MonitorConfig struct {
 	ProcessTracking     bool `yaml:"process_tracking" json:"process_tracking"`
 	CompletionDetection bool `yaml:"completion_detection" json:"completion_detection"`
 	QuietSeconds        int  `yaml:"quiet_seconds" json:"quiet_seconds"`
+	PerInstance         bool `yaml:"per_instance" json:"per_instance"` // Track each instance separately (by log file)
 }
 
 // OutputConfig defines notification output formatting.
@@ -94,6 +95,7 @@ func DefaultConfig() *Config {
 			ProcessTracking:     true,
 			CompletionDetection: true,
 			QuietSeconds:        20,
+			PerInstance:         false, // Aggregate by agent type by default
 		},
 		Output: OutputConfig{
 			Verbosity:       "normal",

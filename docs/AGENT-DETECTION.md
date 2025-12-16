@@ -14,6 +14,26 @@ Firebell detects three types of activity:
 
 **Quiet Period**: Notifications are sent after a configurable silence duration (default: 20s) to avoid spam during rapid activity.
 
+### Per-Instance vs Aggregated Tracking
+
+By default, Firebell aggregates state by agent type (e.g., all Claude instances share one state). Enable per-instance mode to track each log file separately:
+
+```yaml
+monitor:
+  per_instance: true
+```
+
+**Aggregated (default):**
+- State keyed by agent name: `map[string]*AgentState` → `"claude"`
+- Multiple log files → single notification when all are quiet
+
+**Per-Instance:**
+- State keyed by file path: `map[string]*InstanceState` → `/path/to/log.jsonl`
+- Each log file → independent notifications
+- Display names include identifiers: "Claude Code (abc12345)"
+
+For Claude, the project hash from the path is used. For other agents, the filename is used.
+
 ---
 
 ## Claude Code

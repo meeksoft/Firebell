@@ -236,6 +236,7 @@ monitor:
   process_tracking: true
   completion_detection: true
   quiet_seconds: 20
+  per_instance: false  # Track each session separately (see below)
 
 output:
   verbosity: normal  # minimal, normal, or verbose
@@ -305,6 +306,32 @@ Firebell sends different notifications based on detected state:
 
 - **Holding** (immediate): When agent explicitly requests tool permission (`tool_use`, `function_call`)
 - **Awaiting** (inferred): When activity stops without a completion cue (quiet period elapsed)
+
+### Per-Instance Tracking
+
+By default, Firebell aggregates all sessions of the same agent type:
+
+```
+5 Claude instances → 1 notification when ALL are quiet
+```
+
+Enable `per_instance: true` to track each session separately:
+
+```yaml
+monitor:
+  per_instance: true
+```
+
+With per-instance mode:
+- Each log file gets its own state tracking
+- Notifications include instance identifier (e.g., "Claude Code (abc12345)")
+- For Claude, the project hash is used; for others, the filename
+
+**When to use:**
+- Running multiple AI assistants on different projects simultaneously
+- Want to know which specific instance finished
+
+**Alternative:** Use `firebell wrap` for per-process tracking without config changes.
 
 ### Process Monitoring
 

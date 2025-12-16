@@ -128,6 +128,7 @@ monitor:
   process_tracking: true
   completion_detection: true
   quiet_seconds: 20
+  per_instance: false  # Track each session separately by log file
 ```
 
 ### CLI Flags & Subcommands

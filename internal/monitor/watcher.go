@@ -39,7 +39,7 @@ func NewWatcher(cfg *config.Config, notifier notify.Notifier, agents []Agent) (*
 
 	w := &Watcher{
 		cfg:      cfg,
-		state:    NewState(),
+		state:    NewState(cfg.Monitor.PerInstance),
 		notifier: notifier,
 		fsw:      fsw,
 		managers: make(map[string]*TailerManager),
@@ -204,6 +204,11 @@ func (w *Watcher) processLines(ctx context.Context, agentName, path string, line
 		return
 	}
 
+	// In per-instance mode, ensure instance exists
+	if w.state.IsPerInstance() {
+		w.state.GetOrCreateInstance(agentName, path)
+	}
+
 	// Determine if we should send activity notifications
 	// - Slack: Never send activity notifications (only "cooling")
 	// - stdout normal: Only send "cooling" notifications
@@ -220,18 +225,21 @@ func (w *Watcher) processLines(ctx context.Context, agentName, path string, line
 			continue
 		}
 
+		// Record cue (per-instance or per-agent)
+		w.recordCue(agentName, path, match.Type)
+
 		// Handle based on match type
 		switch match.Type {
 		case detect.MatchComplete:
 			// Turn complete - record cue for quiet period tracking
 			// After quiet period, this will trigger "Cooling"
-			w.state.RecordCue(agentName, detect.MatchComplete)
 
 			// Only send activity notification if verbose stdout mode
 			if sendActivity {
+				displayName := w.getDisplayName(agentName, path)
 				n := notify.NewNotificationFromMatch(
 					agentName,
-					agentState.Agent.DisplayName,
+					displayName,
 					match.Reason,
 					match.Line,
 				)
@@ -247,17 +255,15 @@ func (w *Watcher) processLines(ctx context.Context, agentName, path string, line
 			// Tool permission requested - record cue for quiet period tracking
 			// After quiet period, this will trigger "Holding" notification
 			// (Don't notify immediately - tool may be auto-approved)
-			w.state.RecordCue(agentName, detect.MatchHolding)
 
 		case detect.MatchAwaiting:
 			// Explicit awaiting (rare - most agents use MatchComplete + quiet period)
-			w.state.RecordCue(agentName, detect.MatchAwaiting)
-			w.sendAwaitingNotification(ctx, agentState.Agent.DisplayName, "Awaiting", "Ready for your input")
+			displayName := w.getDisplayName(agentName, path)
+			w.sendAwaitingNotification(ctx, displayName, "Awaiting", "Ready for your input")
 
 		case detect.MatchActivity:
 			// Normal activity (no completion signal) - record cue for quiet period tracking
 			// After quiet period without a MatchComplete, this will trigger inferred "Awaiting"
-			w.state.RecordCue(agentName, detect.MatchActivity)
 
 			// Only send activity notification if verbose stdout mode
 			if !sendActivity {
@@ -265,9 +271,10 @@ func (w *Watcher) processLines(ctx context.Context, agentName, path string, line
 			}
 
 			// Create and send notification
+			displayName := w.getDisplayName(agentName, path)
 			n := notify.NewNotificationFromMatch(
 				agentName,
-				agentState.Agent.DisplayName,
+				displayName,
 				match.Reason,
 				match.Line,
 			)
@@ -282,6 +289,28 @@ func (w *Watcher) processLines(ctx context.Context, agentName, path string, line
 			}
 		}
 	}
+}
+
+// recordCue records activity cue, using per-instance or per-agent mode.
+func (w *Watcher) recordCue(agentName, path string, cueType detect.MatchType) {
+	if w.state.IsPerInstance() {
+		w.state.RecordInstanceCue(path, cueType)
+	} else {
+		w.state.RecordCue(agentName, cueType)
+	}
+}
+
+// getDisplayName returns the display name for notifications.
+func (w *Watcher) getDisplayName(agentName, path string) string {
+	if w.state.IsPerInstance() {
+		if inst := w.state.GetInstance(path); inst != nil {
+			return inst.DisplayName
+		}
+	}
+	if agentState := w.state.GetAgent(agentName); agentState != nil {
+		return agentState.Agent.DisplayName
+	}
+	return agentName
 }
 
 // sendAwaitingNotification sends an awaiting notification immediately.
@@ -322,40 +351,21 @@ func (w *Watcher) checkQuietPeriods(ctx context.Context) {
 		cpuPct = w.procMon.LastCPU()
 	}
 
+	if w.state.IsPerInstance() {
+		w.checkInstanceQuietPeriods(ctx, quietDuration, cpuPct)
+	} else {
+		w.checkAgentQuietPeriods(ctx, quietDuration, cpuPct)
+	}
+}
+
+// checkAgentQuietPeriods checks quiet periods for agent-level tracking.
+func (w *Watcher) checkAgentQuietPeriods(ctx context.Context, quietDuration time.Duration, cpuPct float64) {
 	for _, agentState := range w.state.GetAllAgents() {
 		if w.state.ShouldSendQuiet(agentState.Agent.Name, quietDuration) {
 			// Determine notification type based on last cue type
 			lastCueType := w.state.GetLastCueType(agentState.Agent.Name)
 
-			var n *notify.Notification
-			switch lastCueType {
-			case detect.MatchComplete:
-				// Turn was completed - send "Cooling" notification
-				n = notify.NewQuietNotification(agentState.Agent.DisplayName, cpuPct)
-
-			case detect.MatchActivity:
-				// Activity without completion signal - infer "Awaiting"
-				// This happens when agent stops mid-turn (likely waiting for permission or blocked)
-				n = &notify.Notification{
-					Agent:   agentState.Agent.DisplayName,
-					Title:   "Awaiting",
-					Message: "No activity detected (may be waiting for input)",
-					Time:    time.Now(),
-				}
-
-			case detect.MatchHolding:
-				// Tool permission was requested and agent is still quiet - send "Holding"
-				n = &notify.Notification{
-					Agent:   agentState.Agent.DisplayName,
-					Title:   "Holding",
-					Message: "Waiting for tool approval",
-					Time:    time.Now(),
-				}
-
-			default:
-				// Default to Cooling for any other case
-				n = notify.NewQuietNotification(agentState.Agent.DisplayName, cpuPct)
-			}
+			n := w.buildQuietNotification(agentState.Agent.DisplayName, lastCueType, cpuPct)
 
 			if err := w.notifier.Send(ctx, n); err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to send notification: %v\n", err)
@@ -363,6 +373,55 @@ func (w *Watcher) checkQuietPeriods(ctx context.Context) {
 
 			w.state.MarkQuietNotified(agentState.Agent.Name)
 		}
+	}
+}
+
+// checkInstanceQuietPeriods checks quiet periods for per-instance tracking.
+func (w *Watcher) checkInstanceQuietPeriods(ctx context.Context, quietDuration time.Duration, cpuPct float64) {
+	for _, inst := range w.state.GetAllInstances() {
+		if w.state.ShouldSendInstanceQuiet(inst.FilePath, quietDuration) {
+			lastCueType := w.state.GetInstanceCueType(inst.FilePath)
+
+			n := w.buildQuietNotification(inst.DisplayName, lastCueType, cpuPct)
+
+			if err := w.notifier.Send(ctx, n); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to send notification: %v\n", err)
+			}
+
+			w.state.MarkInstanceQuietNotified(inst.FilePath)
+		}
+	}
+}
+
+// buildQuietNotification creates a notification based on cue type.
+func (w *Watcher) buildQuietNotification(displayName string, cueType detect.MatchType, cpuPct float64) *notify.Notification {
+	switch cueType {
+	case detect.MatchComplete:
+		// Turn was completed - send "Cooling" notification
+		return notify.NewQuietNotification(displayName, cpuPct)
+
+	case detect.MatchActivity:
+		// Activity without completion signal - infer "Awaiting"
+		// This happens when agent stops mid-turn (likely waiting for permission or blocked)
+		return &notify.Notification{
+			Agent:   displayName,
+			Title:   "Awaiting",
+			Message: "No activity detected (may be waiting for input)",
+			Time:    time.Now(),
+		}
+
+	case detect.MatchHolding:
+		// Tool permission was requested and agent is still quiet - send "Holding"
+		return &notify.Notification{
+			Agent:   displayName,
+			Title:   "Holding",
+			Message: "Waiting for tool approval",
+			Time:    time.Now(),
+		}
+
+	default:
+		// Default to Cooling for any other case
+		return notify.NewQuietNotification(displayName, cpuPct)
 	}
 }
 
