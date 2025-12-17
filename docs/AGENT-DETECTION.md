@@ -12,27 +12,97 @@ Firebell detects three types of activity:
 | `MatchComplete` | Agent finished its turn | "Cooling" after quiet period |
 | `MatchHolding` | Agent waiting for tool approval | "Holding" after quiet period |
 
-**Quiet Period**: Notifications are sent after a configurable silence duration (default: 20s) to avoid spam during rapid activity.
+**Quiet Period**: Notifications are sent after a configurable silence duration (default: 15s) to avoid spam during rapid activity.
+
+### Notification Behavior
+
+Firebell tracks the **last significant cue** and sends notifications after the quiet period:
+
+| Last Cue | Notification | Example Scenario |
+|----------|--------------|------------------|
+| `MatchComplete` | **Cooling** | Claude sent `end_turn`, user hasn't responded in 15s |
+| `MatchActivity` | **Awaiting** | Claude was streaming, went quiet before `end_turn` was logged |
+| `MatchHolding` | **Holding** | Claude sent `tool_use`, user hasn't approved in 15s |
+
+**Cue Priority:**
+- Strong cues (`MatchComplete`, `MatchHolding`) overwrite weaker cues
+- `MatchActivity` does NOT overwrite strong cues
+- This prevents "Cooling" from being downgraded to "Awaiting" by late-arriving activity
+
+**Claude Code Example:**
+```
+Logs show 2901 tool_use vs 248 end_turn (typical agentic workflow)
+→ Most notifications will be "Holding" (waiting for tool approval)
+→ "Cooling" appears when Claude finishes with end_turn
+→ "Awaiting" appears if quiet period elapses before end_turn is logged
+```
 
 ### Per-Instance vs Aggregated Tracking
 
-By default, Firebell aggregates state by agent type (e.g., all Claude instances share one state). Enable per-instance mode to track each log file separately:
+By default, Firebell tracks each log file separately (per-instance mode):
 
-```yaml
-monitor:
-  per_instance: true
-```
-
-**Aggregated (default):**
-- State keyed by agent name: `map[string]*AgentState` → `"claude"`
-- Multiple log files → single notification when all are quiet
-
-**Per-Instance:**
+**Per-Instance (default):**
 - State keyed by file path: `map[string]*InstanceState` → `/path/to/log.jsonl`
 - Each log file → independent notifications
 - Display names include identifiers: "Claude Code (abc12345)"
 
+Set `per_instance: false` to aggregate by agent type:
+
+```yaml
+monitor:
+  per_instance: false
+```
+
+**Aggregated:**
+- State keyed by agent name: `map[string]*AgentState` → `"claude"`
+- Multiple log files → single notification when all are quiet
+
 For Claude, the project hash from the path is used. For other agents, the filename is used.
+
+### Multi-Instance Architecture
+
+Each instance is completely independent with no state overlap:
+
+```
+~/.claude/projects/
+├── abc123/          ← Instance 1 (project A)
+│   └── session.jsonl
+├── def456/          ← Instance 2 (project B)
+│   └── session.jsonl
+└── ghi789/          ← Instance 3 (project C)
+    └── session.jsonl
+```
+
+**Data Flow:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  TailerManager (one per agent type)                     │
+│  BasePath: ~/.claude/projects                           │
+│  Watches: all subdirectories via fsnotify               │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+   abc123/        def456/        ghi789/
+   session.jsonl  session.jsonl  session.jsonl
+        │              │              │
+        ▼              ▼              ▼
+┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+│InstanceState│ │InstanceState│ │ InstanceState│
+│ path=abc123 │ │ path=def456 │ │ path=ghi789 │
+│ LastCue=... │ │ LastCue=... │ │ LastCue=... │
+│ CueType=... │ │ CueType=... │ │ CueType=... │
+└─────────────┘ └─────────────┘ └─────────────┘
+```
+
+**Key Points:**
+
+1. **One watcher per agent** scans the base path, but file changes are routed by path
+2. **State is keyed by file path** - no shared state between instances
+3. **Quiet timers are independent** - Instance 1 can be "Cooling" while Instance 2 is active
+4. **No overlap or interference** - each file write only updates that file's instance state
+5. **Notifications are per-instance** - "Claude Code (abc123): Cooling" vs "Claude Code (def456): Cooling"
 
 ---
 

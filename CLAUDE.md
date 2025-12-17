@@ -112,6 +112,22 @@ Note: Strong cues (MatchComplete, MatchHolding) are not overwritten by MatchActi
 
 State tracks: `LastCue` (timestamp), `LastCueType` (MatchType), `QuietNotified` (bool)
 
+### Multi-Instance Architecture (monitor/state.go)
+
+Per-instance mode (default) tracks each log file independently:
+
+```
+TailerManager (per agent) → watches base path
+        ↓
+   File changes routed by path
+        ↓
+InstanceState (per file) → independent LastCue, CueType, QuietNotified
+```
+
+Key: One watcher per agent type, but state is keyed by file path. No overlap between instances.
+
+See `docs/AGENT-DETECTION.md` for detailed architecture diagrams.
+
 ## Configuration
 
 Config file: `~/.firebell/config.yaml`
@@ -128,7 +144,7 @@ monitor:
   process_tracking: true
   completion_detection: true
   quiet_seconds: 20
-  per_instance: false  # Track each session separately by log file
+  per_instance: true  # Track each session separately by log file (default)
 ```
 
 ### CLI Flags & Subcommands

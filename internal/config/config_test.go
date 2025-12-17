@@ -25,8 +25,8 @@ func TestDefaultConfig(t *testing.T) {
 		t.Error("Expected completion detection to be enabled by default")
 	}
 
-	if cfg.Monitor.QuietSeconds != 20 {
-		t.Errorf("Expected quiet seconds 20, got %d", cfg.Monitor.QuietSeconds)
+	if cfg.Monitor.QuietSeconds != 15 {
+		t.Errorf("Expected quiet seconds 15, got %d", cfg.Monitor.QuietSeconds)
 	}
 
 	if cfg.Output.Verbosity != "normal" {

@@ -235,8 +235,8 @@ agents:
 monitor:
   process_tracking: true
   completion_detection: true
-  quiet_seconds: 20
-  per_instance: false  # Track each session separately (see below)
+  quiet_seconds: 15
+  per_instance: true  # Track each session separately (default)
 
 output:
   verbosity: normal  # minimal, normal, or verbose
@@ -287,51 +287,59 @@ Format-aware detection for each agent:
 
 Firebell sends different notifications based on detected state:
 
-| Notification | Trigger | Description |
-|-------------|---------|-------------|
-| **Cooling** | Quiet period after completion cue | AI finished its turn, likely waiting for your input |
-| **Awaiting** | Quiet period after activity (no completion) | AI stopped mid-task, may be waiting for input |
-| **Holding** | Tool permission request detected | AI needs permission to run a tool (immediate) |
-| **Activity** | AI output detected | AI is actively working (verbose mode only) |
-| **Process Exit** | Monitored process terminated | AI CLI process has exited |
+| Notification | Last Cue Detected | When It Appears |
+|--------------|-------------------|-----------------|
+| **Cooling** | `end_turn` / completion | AI finished its turn, no activity for 15s |
+| **Awaiting** | Activity (no completion) | AI was streaming, then went quiet for 15s without completion signal |
+| **Holding** | `tool_use` / tool request | AI requested a tool, no approval for 15s |
+| **Activity** | Any output | AI is actively working (verbose mode only) |
+| **Process Exit** | Process terminated | AI CLI process has exited |
 
-### Completion Detection
+### How Notifications Work
 
-"Cooling" notifications after quiet periods:
-- Triggers after configurable silence duration (default: 20s)
-- Includes CPU usage if process tracking enabled
-- Requires a "completion cue" (e.g., `end_turn`, `output_text`) before quiet period
+Firebell tracks the **last significant cue** from the AI agent:
 
-### Awaiting & Holding Detection
+```
+AI streaming...     → records Activity
+AI sends end_turn   → records Complete (overwrites Activity)
+AI sends tool_use   → records Holding (overwrites Complete)
+15s of silence      → notification based on last cue
+```
 
-- **Holding** (immediate): When agent explicitly requests tool permission (`tool_use`, `function_call`)
-- **Awaiting** (inferred): When activity stops without a completion cue (quiet period elapsed)
+**For Claude Code specifically:**
+- `stop_reason: "end_turn"` → **Cooling** (Claude finished talking)
+- `stop_reason: "tool_use"` → **Holding** (Claude wants to run a tool)
+- No stop_reason yet → **Awaiting** (Claude was streaming, quiet period elapsed before completion)
+
+**In agentic mode**, Claude frequently uses tools, so you'll see more **Holding** than **Cooling**. This is correct behavior - Claude is waiting for tool approval.
+
+### Quiet Period
+
+Notifications are sent after a configurable silence duration (default: 15s):
+- Gives the AI time to write completion signals to logs
+- Prevents spam during brief pauses between operations
+- Can be adjusted via `monitor.quiet_seconds` in config
 
 ### Per-Instance Tracking
 
-By default, Firebell aggregates all sessions of the same agent type:
+By default, Firebell tracks each session separately:
 
 ```
-5 Claude instances → 1 notification when ALL are quiet
+5 Claude instances → 5 independent notifications
 ```
 
-Enable `per_instance: true` to track each session separately:
+Each log file gets its own state tracking with notifications like "Claude Code (abc12345)".
+
+Set `per_instance: false` to aggregate by agent type instead:
 
 ```yaml
 monitor:
-  per_instance: true
+  per_instance: false  # 1 notification when ALL instances are quiet
 ```
 
-With per-instance mode:
-- Each log file gets its own state tracking
-- Notifications include instance identifier (e.g., "Claude Code (abc12345)")
-- For Claude, the project hash is used; for others, the filename
-
-**When to use:**
-- Running multiple AI assistants on different projects simultaneously
-- Want to know which specific instance finished
-
-**Alternative:** Use `firebell wrap` for per-process tracking without config changes.
+**Display names:**
+- Claude: Uses project hash from path (e.g., "Claude Code (abc12345)")
+- Others: Uses filename (e.g., "Codex (session123)")
 
 ### Process Monitoring
 

@@ -94,8 +94,8 @@ func DefaultConfig() *Config {
 		Monitor: MonitorConfig{
 			ProcessTracking:     true,
 			CompletionDetection: true,
-			QuietSeconds:        20,
-			PerInstance:         false, // Aggregate by agent type by default
+			QuietSeconds:        15,
+			PerInstance:         true, // Track each instance separately by default
 		},
 		Output: OutputConfig{
 			Verbosity:       "normal",
