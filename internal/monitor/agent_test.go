@@ -191,7 +191,7 @@ func TestDetectActiveAgents(t *testing.T) {
 	tmpDir := t.TempDir()
 	testLogPath := filepath.Join(tmpDir, "test.log")
 
-	// Create a recent log file
+	// Create a log file (mtime can be stale or recent; presence should include the agent)
 	if err := os.WriteFile(testLogPath, []byte("test"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -244,5 +244,50 @@ func TestHasRecentActivity(t *testing.T) {
 	// Test non-existent directory
 	if hasRecentActivity("/nonexistent", 1*time.Hour) {
 		t.Error("Expected no activity for nonexistent directory")
+	}
+}
+
+func TestFindStaleAgents(t *testing.T) {
+	tmpDir := t.TempDir()
+	testLogPath := filepath.Join(tmpDir, "stale.log")
+
+	// Create a log file and force its mtime to be old
+	if err := os.WriteFile(testLogPath, []byte("stale"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(testLogPath, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	oldRegistry := Registry
+	Registry = map[string]Agent{
+		"stale": {
+			Name:        "stale",
+			DisplayName: "Stale Agent",
+			LogPath:     tmpDir,
+			LogPatterns: []string{"*.log"},
+		},
+	}
+	defer func() { Registry = oldRegistry }()
+
+	agents := DetectActiveAgents()
+	if len(agents) != 1 {
+		t.Fatalf("Expected 1 agent from DetectActiveAgents, got %d", len(agents))
+	}
+
+	stale := FindStaleAgents(agents, 24*time.Hour)
+	if len(stale) != 1 || stale[0].Name != "stale" {
+		t.Fatalf("Expected stale agent to be reported, got %v", stale)
+	}
+
+	// Update mtime to make it recent; should no longer be stale
+	newTime := time.Now()
+	if err := os.Chtimes(testLogPath, newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+	stale = FindStaleAgents(agents, 24*time.Hour)
+	if len(stale) != 0 {
+		t.Fatalf("Expected no stale agents after recent update, got %v", stale)
 	}
 }

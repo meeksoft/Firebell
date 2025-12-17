@@ -370,6 +370,9 @@ func runMonitor(cfg *config.Config, agents []monitor.Agent) error {
 	}
 	defer watcher.Close()
 
+	// Identify stale agents (>24h without log updates) for informational output
+	staleAgents := monitor.FindStaleAgents(agents, 24*time.Hour)
+
 	// Print startup info
 	if isDaemon {
 		agentNames := ""
@@ -381,6 +384,7 @@ func runMonitor(cfg *config.Config, agents []monitor.Agent) error {
 		}
 		logger.Info("Notify: %s", notifier.Name())
 		logger.Info("Agents: %s", agentNames)
+		logger.Info("Stale (>24h): %s", formatAgentList(staleAgents))
 		logger.Info("Monitoring started")
 	} else {
 		fmt.Printf("firebell %s - Starting monitoring...\n", config.Version)
@@ -394,6 +398,7 @@ func runMonitor(cfg *config.Config, agents []monitor.Agent) error {
 			fmt.Print(agent.DisplayName)
 		}
 		fmt.Println()
+		fmt.Printf("  Stale (>24h): %s\n", formatAgentList(staleAgents))
 		fmt.Println()
 	}
 
@@ -706,6 +711,18 @@ func formatBytes(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// formatAgentList returns a comma-separated list of agent display names (or "none" if empty).
+func formatAgentList(agents []monitor.Agent) string {
+	if len(agents) == 0 {
+		return "none"
+	}
+	names := make([]string, 0, len(agents))
+	for _, a := range agents {
+		names = append(names, a.DisplayName)
+	}
+	return strings.Join(names, ", ")
 }
 
 // runEvents shows or follows the event file.

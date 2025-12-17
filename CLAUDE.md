@@ -139,7 +139,7 @@ notify:
   slack:
     webhook: "https://hooks.slack.com/..."
 agents:
-  enabled: []  # Empty = auto-detect
+  enabled: []  # Empty = auto-detect installed agents (log path exists)
 monitor:
   process_tracking: true
   completion_detection: true
@@ -160,6 +160,8 @@ monitor:
 wrap             Wrap command and monitor output
 start/stop       Daemon control
 status/logs      Daemon info
+
+When starting the CLI or daemon, Firebell prints monitored agents plus a "Stale (>24h)" line for installed-but-idle agents.
 ```
 
 ## Coding Style

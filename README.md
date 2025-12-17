@@ -22,7 +22,7 @@ Requires: Go 1.21+ and Git
 - **Smart Detection** - Format-aware pattern matching (JSONL for Claude/Codex, API events for Copilot)
 - **Completion Detection** - "Cooling" notifications after quiet periods
 - **Awaiting Detection** - Notifications when AI is waiting for input or tool approval
-- **Simple Setup** - Interactive wizard, auto-detection, minimal configuration
+- **Simple Setup** - Interactive wizard, auto-detects installed agents, minimal configuration
 - **Zero Dependencies** - Single Go binary, no runtime requirements
 
 ## Quick Start
@@ -52,7 +52,7 @@ firebell
 # Interactive setup (first time)
 firebell --setup
 
-# Health check - see which agents are active
+# Health check - see which agents are active/installed
 firebell --check
 
 # Monitor all auto-detected agents
@@ -69,7 +69,7 @@ firebell --stdout
 
 | Command | Description |
 |---------|-------------|
-| `firebell` | Start monitoring in foreground (auto-detects active agents) |
+| `firebell` | Start monitoring in foreground (auto-detects installed agents) |
 | `firebell start` | Start daemon in background |
 | `firebell stop` | Stop running daemon |
 | `firebell restart` | Restart daemon |
@@ -87,6 +87,8 @@ firebell --stdout
 | `firebell --stdout` | Output to terminal (testing) |
 | `firebell --migrate` | Migrate v1 config to v2 |
 | `firebell --version` | Print version |
+
+When running `firebell` (CLI or daemon), it prints the monitored agents and a "Stale (>24h)" line to show installed agents whose logs haven’t updated recently.
 
 ## Command Wrapping
 

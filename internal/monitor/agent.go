@@ -120,8 +120,7 @@ func GetAgents(filter []string) []Agent {
 }
 
 // DetectActiveAgents scans the filesystem for agents with recent log activity.
-// An agent is considered "active" if its log directory exists and has been
-// modified within the last 24 hours.
+// An agent is considered "active" if its log path exists (regardless of recency).
 func DetectActiveAgents() []Agent {
 	var active []Agent
 
@@ -136,18 +135,43 @@ func DetectActiveAgents() []Agent {
 
 		// If it's a directory, check for recent modifications
 		if info.IsDir() {
-			if hasRecentActivity(expanded, 24*time.Hour) {
-				active = append(active, agent)
-			}
+			active = append(active, agent)
 		} else {
 			// If it's a file, check its modification time
-			if time.Since(info.ModTime()) < 24*time.Hour {
+			if hasLogExtension(expanded) {
 				active = append(active, agent)
 			}
 		}
 	}
 
 	return active
+}
+
+// FindStaleAgents returns agents whose log paths exist but have no activity within the duration.
+// Paths that fail to stat or have no log files are treated as stale for reporting.
+func FindStaleAgents(agents []Agent, within time.Duration) []Agent {
+	var stale []Agent
+
+	for _, agent := range agents {
+		expanded := ExpandPath(agent.LogPath)
+		info, err := os.Stat(expanded)
+		if err != nil {
+			stale = append(stale, agent)
+			continue
+		}
+
+		if info.IsDir() {
+			if !hasRecentActivity(expanded, within) {
+				stale = append(stale, agent)
+			}
+		} else {
+			if time.Since(info.ModTime()) > within {
+				stale = append(stale, agent)
+			}
+		}
+	}
+
+	return stale
 }
 
 // hasRecentActivity checks if a directory has files modified within the duration.
