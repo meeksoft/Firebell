@@ -9,7 +9,7 @@ set -euo pipefail
 REPO="https://github.com/meeksoft/Firebell.git"
 INSTALL_DIR="${HOME}/.firebell"
 BIN_DIR="${INSTALL_DIR}/bin"
-VERSION="2.0.0"
+VERSION="1.4.4"
 
 # Colors
 RED='\033[0;31m'
@@ -28,7 +28,7 @@ check_os() {
     case "$(uname -s)" in
         Linux*)  OS="linux" ;;
         Darwin*) OS="darwin" ;;
-        *)       error "Unsupported OS: $(uname -s). Firebell only supports Linux and macOS." ;;
+        *)       error "Unsupported OS: $(uname -s). Firebell supports Linux (full features) and macOS/Windows (log monitoring only)." ;;
     esac
 
     case "$(uname -m)" in

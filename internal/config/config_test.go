@@ -1,6 +1,8 @@
 package config
 
 import (
+	"flag"
+	"os"
 	"testing"
 )
 
@@ -197,4 +199,285 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestParseFlags(t *testing.T) {
+	// Save original args and restore after test
+	origArgs := os.Args
+	defer func() { os.Args = origArgs }()
+
+	tests := []struct {
+		name     string
+		args     []string
+		setupFn  func() *Flags
+		verifyFn func(t *testing.T, f *Flags)
+	}{
+		{
+			name: "default flags",
+			args: []string{"firebell"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if f.ConfigPath != "" {
+					t.Errorf("Expected empty ConfigPath, got %q", f.ConfigPath)
+				}
+				if f.Setup || f.Check || f.Stdout || f.Verbose || f.Version {
+					t.Error("Expected default bool flags to be false")
+				}
+			},
+		},
+		{
+			name: "with config flag",
+			args: []string{"firebell", "--config", "/path/to/config.yaml"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if f.ConfigPath != "/path/to/config.yaml" {
+					t.Errorf("Expected ConfigPath=/path/to/config.yaml, got %q", f.ConfigPath)
+				}
+			},
+		},
+		{
+			name: "with stdout flag",
+			args: []string{"firebell", "--stdout"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if !f.Stdout {
+					t.Error("Expected Stdout to be true")
+				}
+			},
+		},
+		{
+			name: "with verbose flag",
+			args: []string{"firebell", "--verbose"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if !f.Verbose {
+					t.Error("Expected Verbose to be true")
+				}
+			},
+		},
+		{
+			name: "with agent flag",
+			args: []string{"firebell", "--agent", "claude"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if f.Agent != "claude" {
+					t.Errorf("Expected Agent=claude, got %q", f.Agent)
+				}
+			},
+		},
+		{
+			name: "start subcommand",
+			args: []string{"firebell", "start"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if !f.DaemonStart {
+					t.Error("Expected DaemonStart to be true")
+				}
+			},
+		},
+		{
+			name: "stop subcommand",
+			args: []string{"firebell", "stop"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if !f.DaemonStop {
+					t.Error("Expected DaemonStop to be true")
+				}
+			},
+		},
+		{
+			name: "restart subcommand",
+			args: []string{"firebell", "restart"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if !f.DaemonRestart {
+					t.Error("Expected DaemonRestart to be true")
+				}
+			},
+		},
+		{
+			name: "status subcommand",
+			args: []string{"firebell", "status"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if !f.DaemonStatus {
+					t.Error("Expected DaemonStatus to be true")
+				}
+			},
+		},
+		{
+			name: "logs subcommand",
+			args: []string{"firebell", "logs"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if !f.DaemonLogs {
+					t.Error("Expected DaemonLogs to be true")
+				}
+			},
+		},
+		{
+			name: "logs subcommand with follow",
+			args: []string{"firebell", "logs", "-f"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if !f.DaemonLogs {
+					t.Error("Expected DaemonLogs to be true")
+				}
+				if !f.DaemonFollow {
+					t.Error("Expected DaemonFollow to be true")
+				}
+			},
+		},
+		{
+			name: "wrap subcommand with command",
+			args: []string{"firebell", "wrap", "--", "claude"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if !f.Wrap {
+					t.Error("Expected Wrap to be true")
+				}
+				if len(f.WrapArgs) != 1 || f.WrapArgs[0] != "claude" {
+					t.Errorf("Expected WrapArgs=[claude], got %v", f.WrapArgs)
+				}
+				if f.WrapName != "claude" {
+					t.Errorf("Expected default WrapName=claude, got %q", f.WrapName)
+				}
+			},
+		},
+		{
+			name: "wrap subcommand with name flag",
+			args: []string{"firebell", "wrap", "--name", "MyAI", "--", "claude"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if !f.Wrap {
+					t.Error("Expected Wrap to be true")
+				}
+				if f.WrapName != "MyAI" {
+					t.Errorf("Expected WrapName=MyAI, got %q", f.WrapName)
+				}
+			},
+		},
+		{
+			name: "wrap subcommand without -- separator",
+			args: []string{"firebell", "wrap", "claude"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if !f.Wrap {
+					t.Error("Expected Wrap to be true")
+				}
+			},
+		},
+		{
+			name: "events subcommand",
+			args: []string{"firebell", "events"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if !f.Events {
+					t.Error("Expected Events to be true")
+				}
+			},
+		},
+		{
+			name: "events subcommand with follow",
+			args: []string{"firebell", "events", "-f"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if !f.Events {
+					t.Error("Expected Events to be true")
+				}
+				if !f.EventsFollow {
+					t.Error("Expected EventsFollow to be true")
+				}
+			},
+		},
+		{
+			name: "listen subcommand",
+			args: []string{"firebell", "listen"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if !f.Listen {
+					t.Error("Expected Listen to be true")
+				}
+			},
+		},
+		{
+			name: "listen subcommand with json",
+			args: []string{"firebell", "listen", "--json"},
+			setupFn: func() *Flags {
+				return ParseFlags()
+			},
+			verifyFn: func(t *testing.T, f *Flags) {
+				if !f.Listen {
+					t.Error("Expected Listen to be true")
+				}
+				if !f.ListenJSON {
+					t.Error("Expected ListenJSON to be true")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset flag set
+			flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+
+			os.Args = tt.args
+			f := tt.setupFn()
+			tt.verifyFn(t, f)
+		})
+	}
+}
+
+func TestValidationError(t *testing.T) {
+	err := &ValidationError{
+		Field:   "test.field",
+		Message: "test error message",
+	}
+
+	if err.Error() == "" {
+		t.Error("Expected Error() to return non-empty string")
+	}
+
+	if err.Field != "test.field" {
+		t.Errorf("Expected Field=test.field, got %q", err.Field)
+	}
+
+	if err.Message != "test error message" {
+		t.Errorf("Expected Message=test error message, got %q", err.Message)
+	}
 }

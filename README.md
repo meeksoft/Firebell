@@ -12,6 +12,10 @@ curl -fsSL https://raw.githubusercontent.com/meeksoft/Firebell/main/install.sh |
 
 Requires: Go 1.21+ and Git
 
+**Platform Support:**
+- **Linux**: Full feature support (log monitoring + process tracking)
+- **macOS/Windows**: Log monitoring only (process tracking requires Linux `/proc`)
+
 ## Features
 
 - **Multi-CLI Support** - Monitors Claude Code, Codex, Copilot, Gemini, OpenCode, Crush, Qwen Code, Amazon Q, Plandex, Aider
@@ -396,8 +400,9 @@ See [CLAUDE.md](CLAUDE.md) for architecture documentation.
 
 ### Process monitoring not working
 
-1. Linux only (uses `/proc` filesystem)
-2. Verify process is running: `ps aux | grep claude`
+1. **Linux only** - Process tracking requires `/proc` filesystem (not available on macOS/Windows)
+2. Log monitoring still works on all platforms
+3. Verify process is running: `ps aux | grep claude`
 
 ## License
 
