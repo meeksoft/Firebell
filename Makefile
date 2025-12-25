@@ -1,4 +1,4 @@
-VERSION := 1.4.4
+VERSION := 1.5.0
 BINARY := firebell
 BUILD_DIR := bin
 INSTALL_DIR := $(HOME)/.firebell/bin

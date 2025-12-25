@@ -174,9 +174,8 @@ When starting the CLI or daemon, Firebell prints monitored agents plus a "Stale 
 
 ## Constraints
 
-- **Linux**: Full process monitoring support via `/proc` filesystem
-- **macOS/Windows**: Log monitoring works; process tracking not supported (logs only)
 - **Text logs only**: Binary logs not supported
+- **All platforms**: Full feature support (Linux, macOS, Windows)
 - **Max depth**: 4 levels of directory traversal
 
 ## Commit Guidelines

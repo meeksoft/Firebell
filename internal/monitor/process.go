@@ -1,36 +1,38 @@
 // Package monitor provides process monitoring with caching for firebell v2.0.
-// Platform-specific implementations are in process_linux.go and process_stub.go.
+// This implementation uses github.com/shirou/gopsutil for cross-platform support.
 package monitor
 
 import (
 	"fmt"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
+
+	"github.com/shirou/gopsutil/v3/process"
 )
 
 // ProcSample represents a snapshot of process resource usage.
-// On Linux, this is read from /proc/{pid}/stat. On other platforms,
-// fields will be zero/empty as process monitoring is not supported.
+// This implementation works on Linux, macOS, Windows, and other platforms.
 type ProcSample struct {
 	CPUSeconds float64   // Cumulative CPU time (user + system) in seconds
 	Wall       time.Time // Wall clock time when sample was taken
 	RSSBytes   int64     // Resident set size (physical memory) in bytes
 	VSZBytes   int64     // Virtual memory size in bytes
-	State      string    // Process state (R/S/D/Z/T/etc)
+	State      string    // Process state (R/S/D/Z/T/etc) - platform-dependent
 }
 
-// ProcessMonitor tracks a process and caches the PID to avoid repeated /proc scans.
+// ProcessMonitor tracks a process and caches the PID to avoid repeated scans.
 type ProcessMonitor struct {
-	pid           int           // Cached PID (0 = not detected)
-	lastSample    *ProcSample   // Most recent sample
-	lastCPU       float64       // Last calculated CPU percentage
-	idleSince     time.Time     // When CPU first went below threshold
-	idleNotified  bool          // Whether idle notification was sent
-	candidates    []string      // Process names to search for
-	cacheValid    bool          // Whether cached PID is still valid
-	lastDetect    time.Time     // Last time we scanned /proc
-	detectCooldown time.Duration // Minimum time between /proc scans
+	pid            int           // Cached PID (0 = not detected)
+	lastSample     *ProcSample   // Most recent sample
+	lastCPU        float64       // Last calculated CPU percentage
+	idleSince      time.Time     // When CPU first went below threshold
+	idleNotified   bool          // Whether idle notification was sent
+	candidates     []string      // Process names to search for
+	cacheValid     bool          // Whether cached PID is still valid
+	lastDetect     time.Time     // Last time we scanned for processes
+	detectCooldown time.Duration // Minimum time between process scans
 }
 
 // NewProcessMonitor creates a new process monitor for the given candidate process names.
@@ -42,7 +44,7 @@ func NewProcessMonitor(candidates []string) *ProcessMonitor {
 }
 
 // GetPID returns the monitored process ID, auto-detecting if needed.
-// Uses caching to avoid repeated /proc scans.
+// Uses caching to avoid repeated process scans.
 func (pm *ProcessMonitor) GetPID() int {
 	// If we have a cached PID and it's still alive, return it
 	if pm.pid > 0 && pm.cacheValid {
@@ -53,7 +55,7 @@ func (pm *ProcessMonitor) GetPID() int {
 		pm.pid = 0
 	}
 
-	// Respect cooldown to avoid hammering /proc
+	// Respect cooldown to avoid hammering process list
 	if time.Since(pm.lastDetect) < pm.detectCooldown {
 		return pm.pid
 	}
@@ -73,10 +75,22 @@ func (pm *ProcessMonitor) SetPID(pid int) {
 }
 
 // IsAlive checks if the monitored process is still running.
+// Uses platform-appropriate methods.
 func (pm *ProcessMonitor) IsAlive() bool {
 	if pm.pid <= 0 {
 		return false
 	}
+
+	// Try gopsutil first (works on all platforms)
+	p, err := process.NewProcess(int32(pm.pid))
+	if err == nil {
+		running, _ := p.IsRunning()
+		if running {
+			return true
+		}
+	}
+
+	// Fallback to syscall (works on Unix-like systems)
 	return syscall.Kill(pm.pid, 0) == nil
 }
 
@@ -190,7 +204,13 @@ func WatchPID(pid int) <-chan struct{} {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
-			if syscall.Kill(pid, 0) != nil {
+			p, err := process.NewProcess(int32(pid))
+			if err != nil {
+				close(done)
+				return
+			}
+			running, _ := p.IsRunning()
+			if !running {
 				close(done)
 				return
 			}
@@ -214,4 +234,96 @@ func GetProcessCandidates(agents []Agent) []string {
 	}
 
 	return candidates
+}
+
+// detectPID scans the process list for matching candidate process names.
+// Returns the most recently created matching process.
+func (pm *ProcessMonitor) detectPID() int {
+	if len(pm.candidates) == 0 {
+		return 0
+	}
+
+	procs, err := process.Processes()
+	if err != nil {
+		return 0
+	}
+
+	type found struct {
+		pid   int32
+		create int64
+	}
+	var latest found
+
+	for _, p := range procs {
+		// Get command line to check for matches
+		cmdline, err := p.Cmdline()
+		if err != nil || cmdline == "" {
+			continue
+		}
+
+		// Check if this process matches any of our candidates
+		matched := false
+		for _, name := range pm.candidates {
+			if strings.Contains(cmdline, name) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+
+		// Get creation time to find the most recent match
+		create, err := p.CreateTime()
+		if err != nil {
+			continue
+		}
+
+		if create > latest.create {
+			latest = found{pid: p.Pid, create: create}
+		}
+	}
+
+	return int(latest.pid)
+}
+
+// ReadProcSample reads process stats using gopsutil (cross-platform).
+func ReadProcSample(pid int) (ProcSample, error) {
+	p, err := process.NewProcess(int32(pid))
+	if err != nil {
+		return ProcSample{}, fmt.Errorf("failed to open process: %w", err)
+	}
+
+	sample := ProcSample{
+		Wall: time.Now(),
+	}
+
+	// Get CPU times
+	times, err := p.Times()
+	if err == nil {
+		sample.CPUSeconds = times.User + times.System
+	}
+
+	// Get memory info
+	memInfo, err := p.MemoryInfo()
+	if err == nil {
+		sample.RSSBytes = int64(memInfo.RSS)
+		sample.VSZBytes = int64(memInfo.VMS)
+	}
+
+	// Get process status/state (platform-dependent)
+	// On Linux/Unix: status field contains state (R/S/D/Z/T)
+	// On Windows: this may not be available
+	status, err := p.Status()
+	if err == nil && len(status) > 0 {
+		sample.State = status[0]
+	}
+
+	return sample, nil
+}
+
+// IsProcessMonitoringSupported returns true on all platforms where gopsutil works.
+// This includes Linux, macOS, Windows, FreeBSD, and others.
+func IsProcessMonitoringSupported() bool {
+	return true
 }

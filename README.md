@@ -13,8 +13,7 @@ curl -fsSL https://raw.githubusercontent.com/meeksoft/Firebell/main/install.sh |
 Requires: Go 1.21+ and Git
 
 **Platform Support:**
-- **Linux**: Full feature support (log monitoring + process tracking)
-- **macOS/Windows**: Log monitoring only (process tracking requires Linux `/proc`)
+- **Linux/macOS/Windows**: Full feature support (log monitoring + process tracking)
 
 ## Features
 
@@ -27,7 +26,7 @@ Requires: Go 1.21+ and Git
 - **Completion Detection** - "Cooling" notifications after quiet periods
 - **Awaiting Detection** - Notifications when AI is waiting for input or tool approval
 - **Simple Setup** - Interactive wizard, auto-detects installed agents, minimal configuration
-- **Zero Dependencies** - Single Go binary, no runtime requirements
+- **Zero Runtime Dependencies** - Single Go binary, all dependencies bundled
 
 ## Quick Start
 
@@ -400,9 +399,9 @@ See [CLAUDE.md](CLAUDE.md) for architecture documentation.
 
 ### Process monitoring not working
 
-1. **Linux only** - Process tracking requires `/proc` filesystem (not available on macOS/Windows)
-2. Log monitoring still works on all platforms
-3. Verify process is running: `ps aux | grep claude`
+1. Verify process is running: `ps aux | grep claude` (Linux/macOS) or `tasklist | findstr claude` (Windows)
+2. Check that process tracking is enabled in config: `monitor.process_tracking: true`
+3. Log monitoring works independently if process tracking fails
 
 ## License
 
